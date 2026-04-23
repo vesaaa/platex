@@ -5,13 +5,17 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
 	"math"
 	"os"
 
+	"golang.org/x/image/bmp"
 	"golang.org/x/image/draw"
+	"golang.org/x/image/tiff"
+	"golang.org/x/image/webp"
 )
 
 // resizeImage resizes an image to the target dimensions using high-quality interpolation.
@@ -204,10 +208,15 @@ func rgbToHSV(r, g, b float64) (h, s, v float64) {
 	return h, s, v
 }
 
-// Ensure jpeg and png decoders are registered
+// Ensure all image format decoders are registered
 func init() {
-	// Force import of image decoders
+	// Standard library formats
 	_ = jpeg.Decode
 	_ = png.Decode
+	_ = gif.Decode
+	// Extended formats from golang.org/x/image
+	_ = bmp.Decode
+	_ = webp.Decode
+	_ = tiff.Decode
 	_ = color.NRGBA{}
 }

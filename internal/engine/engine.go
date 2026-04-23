@@ -114,7 +114,8 @@ func (e *Engine) recognizeSingle(img image.Image) (*types.PlateResult, error) {
 	}
 
 	if plateNumber == "" || confidence < e.config.Rec.MinConfidence {
-		return nil, fmt.Errorf("confidence too low: %.2f < %.2f", confidence, e.config.Rec.MinConfidence)
+		// Not an error - just no plate detected with sufficient confidence
+		return nil, nil
 	}
 
 	// Step 2: Color classification
@@ -189,8 +190,12 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, opts *types.Recognize
 				// Wait for result
 				select {
 				case plate := <-job.resultCh:
-					result.Plates = []types.PlateResult{*plate}
-					e.totalPlates.Add(1)
+					if plate != nil {
+						result.Plates = []types.PlateResult{*plate}
+						e.totalPlates.Add(1)
+					} else {
+						result.Plates = []types.PlateResult{} // no plate found
+					}
 				case err := <-job.errCh:
 					result.Error = err.Error()
 				}
