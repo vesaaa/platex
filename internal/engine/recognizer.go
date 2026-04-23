@@ -25,8 +25,8 @@ func NewRecognizer(modelPath string, threads, optLevel int) (*Recognizer, error)
 
 	return &Recognizer{
 		model:       model,
-		inputWidth:  168, // CRNN standard input width
-		inputHeight: 48,  // CRNN standard input height
+		inputWidth:  160, // HyperLPR3 rpv3_mdict model input width
+		inputHeight: 48,  // HyperLPR3 rpv3_mdict model input height
 	}, nil
 }
 
@@ -58,7 +58,7 @@ func (r *Recognizer) runInference(input []float32) ([]float32, error) {
 // getOutputTimeSteps returns the number of time steps in CRNN output.
 func (r *Recognizer) getOutputTimeSteps() int {
 	// CRNN output width depends on input width: typically inputWidth/4
-	return r.inputWidth / 4 // 168/4 = 42 time steps
+	return r.inputWidth / 4 // 160/4 = 40 time steps
 }
 
 // ctcDecode performs CTC (Connectionist Temporal Classification) greedy decoding.
