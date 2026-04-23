@@ -83,6 +83,7 @@ type ImageInput struct {
 type RecognizeOption struct {
 	MaxPlates     int     `json:"max_plates,omitempty"`
 	MinConfidence float32 `json:"min_confidence,omitempty"`
+	ResizeMode    string  `json:"resize_mode,omitempty"` // "letterbox" (default) or "stretch"
 }
 
 // RecognizeResponse represents the HTTP response body.

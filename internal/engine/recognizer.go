@@ -11,9 +11,10 @@ import (
 
 // Recognizer handles license plate character recognition using CRNN model.
 type Recognizer struct {
-	model       *Model
-	inputWidth  int
-	inputHeight int
+	model        *Model
+	inputWidth   int
+	inputHeight  int
+	useLetterbox bool
 }
 
 // NewRecognizer creates a new plate character recognizer.
@@ -24,9 +25,10 @@ func NewRecognizer(modelPath string, threads, optLevel int) (*Recognizer, error)
 	}
 
 	return &Recognizer{
-		model:       model,
-		inputWidth:  160, // HyperLPR3 rpv3_mdict model input width
-		inputHeight: 48,  // HyperLPR3 rpv3_mdict model input height
+		model:        model,
+		inputWidth:   160, // HyperLPR3 rpv3_mdict model input width
+		inputHeight:  48,  // HyperLPR3 rpv3_mdict model input height
+		useLetterbox: true, // default to letterbox for best accuracy
 	}, nil
 }
 
@@ -36,7 +38,7 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 	// Preprocess: resize to model input size and convert to tensor
 	mean := [3]float32{0.485, 0.456, 0.406}
 	std := [3]float32{0.229, 0.224, 0.225}
-	tensor := imageToTensorCHW(img, r.inputWidth, r.inputHeight, mean, std)
+	tensor := imageToTensorCHW(img, r.inputWidth, r.inputHeight, mean, std, r.useLetterbox)
 
 	// Run inference
 	output, err := r.runInference(tensor)

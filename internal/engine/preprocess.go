@@ -15,9 +15,46 @@ import (
 )
 
 // resizeImage resizes an image to the target dimensions using high-quality interpolation.
+// This is a direct stretch resize - may distort aspect ratio.
 func resizeImage(src image.Image, width, height int) *image.NRGBA {
 	dst := image.NewNRGBA(image.Rect(0, 0, width, height))
 	draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
+	return dst
+}
+
+// letterboxResize resizes an image while preserving aspect ratio, padding with gray (128).
+// This prevents character distortion when the input aspect ratio differs from the model's.
+func letterboxResize(src image.Image, width, height int) *image.NRGBA {
+	srcBounds := src.Bounds()
+	srcW := float64(srcBounds.Dx())
+	srcH := float64(srcBounds.Dy())
+	targetW := float64(width)
+	targetH := float64(height)
+
+	// Calculate scale to fit within target while preserving aspect ratio
+	scale := targetW / srcW
+	if srcH*scale > targetH {
+		scale = targetH / srcH
+	}
+
+	newW := int(srcW * scale)
+	newH := int(srcH * scale)
+
+	// Fill with gray (128, 128, 128) background
+	dst := image.NewNRGBA(image.Rect(0, 0, width, height))
+	gray := color.NRGBA{R: 128, G: 128, B: 128, A: 255}
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			dst.SetNRGBA(x, y, gray)
+		}
+	}
+
+	// Center the scaled image on the gray background
+	offsetX := (width - newW) / 2
+	offsetY := (height - newH) / 2
+	scaledRect := image.Rect(offsetX, offsetY, offsetX+newW, offsetY+newH)
+	draw.BiLinear.Scale(dst, scaledRect, src, srcBounds, draw.Over, nil)
+
 	return dst
 }
 
@@ -42,8 +79,14 @@ func decodeImage(r io.Reader) (image.Image, error) {
 
 // imageToTensorCHW converts an image to a float32 tensor in CHW format (channels, height, width).
 // The tensor is normalized to [0, 1] by default, or with custom mean/std if provided.
-func imageToTensorCHW(img image.Image, width, height int, mean, std [3]float32) []float32 {
-	resized := resizeImage(img, width, height)
+// If useLetterbox is true, preserves aspect ratio and pads with gray.
+func imageToTensorCHW(img image.Image, width, height int, mean, std [3]float32, useLetterbox bool) []float32 {
+	var resized *image.NRGBA
+	if useLetterbox {
+		resized = letterboxResize(img, width, height)
+	} else {
+		resized = resizeImage(img, width, height)
+	}
 	tensor := make([]float32, 3*height*width)
 	channelSize := height * width
 
@@ -63,10 +106,10 @@ func imageToTensorCHW(img image.Image, width, height int, mean, std [3]float32) 
 }
 
 // imageToTensorCHWSimple converts an image to a float32 tensor normalized to [0, 1].
-func imageToTensorCHWSimple(img image.Image, width, height int) []float32 {
+func imageToTensorCHWSimple(img image.Image, width, height int, useLetterbox bool) []float32 {
 	mean := [3]float32{0.0, 0.0, 0.0}
 	std := [3]float32{1.0, 1.0, 1.0}
-	return imageToTensorCHW(img, width, height, mean, std)
+	return imageToTensorCHW(img, width, height, mean, std, useLetterbox)
 }
 
 // cropImage extracts a rectangular region from an image.

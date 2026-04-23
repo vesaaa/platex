@@ -46,7 +46,7 @@ func (c *ColorClassifier) Classify(img image.Image) (int, float32) {
 	// Preprocess
 	mean := [3]float32{0.485, 0.456, 0.406}
 	std := [3]float32{0.229, 0.224, 0.225}
-	tensor := imageToTensorCHW(img, c.inputWidth, c.inputHeight, mean, std)
+	tensor := imageToTensorCHW(img, c.inputWidth, c.inputHeight, mean, std, false)
 
 	// Run inference
 	output, err := c.runInference(tensor)

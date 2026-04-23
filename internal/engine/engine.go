@@ -149,6 +149,15 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, opts *types.Recognize
 	}
 	_ = minConf // Will be used when model is integrated
 
+	// Set resize mode: default to letterbox
+	if e.recognizer != nil {
+		if opts != nil && opts.ResizeMode == "stretch" {
+			e.recognizer.useLetterbox = false
+		} else {
+			e.recognizer.useLetterbox = true
+		}
+	}
+
 	var wg sync.WaitGroup
 
 	for i, input := range inputs {
