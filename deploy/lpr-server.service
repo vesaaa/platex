@@ -1,0 +1,30 @@
+[Unit]
+Description=JSAI-LPR Server - License Plate Recognition Service
+Documentation=https://github.com/vesaa/platex
+After=network.target
+
+[Service]
+Type=simple
+User=lpr
+Group=lpr
+WorkingDirectory=/opt/lpr
+ExecStart=/opt/lpr/lpr-server -config /opt/lpr/configs/config.yaml
+Restart=always
+RestartSec=5
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/lpr/logs
+PrivateTmp=true
+
+# Environment
+Environment=GOMAXPROCS=0
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,40 @@
+# JSAI-LPR Server Configuration
+# 车牌识别服务配置
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+  max_request_body: 100MB
+
+engine:
+  # 默认识别模式: "crop" = 车牌小图识别, "full" = 全图检测+识别
+  mode: "crop"
+  # Worker数量, 0 = 自动 (CPU核心数 * 0.75)
+  workers: 0
+
+  models:
+    recognizer: "models/plate_rec.onnx"
+    detector: "models/plate_detect.onnx"
+    color: "models/plate_color.onnx"
+
+  onnx:
+    # 每个ONNX Session的推理线程数
+    threads_per_session: 1
+    # 图优化级别: 0=禁用 1=基础 2=扩展 3=全部
+    optimization_level: 3
+
+  recognition:
+    # 最低置信度阈值
+    min_confidence: 0.6
+    # 全图模式下单图最大车牌数
+    max_plates: 10
+
+logging:
+  # 日志级别: debug, info, warn, error
+  level: "info"
+  # 日志格式: json, text
+  format: "json"
+  # 输出目标: stdout 或文件路径
+  output: "stdout"
