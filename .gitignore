@@ -33,3 +33,4 @@ models_extracted/
 hyperlpr3*/  
 hyperlpr3.json  
 hyperlpr3.zip  
+c_api_*.h  
