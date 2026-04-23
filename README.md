@@ -41,17 +41,16 @@ bash scripts/build.sh linux-arm64
 最终的目录结构应为：
 ```
 models/
-├── plate_rec.onnx       
-├── plate_detect.onnx    
-└── plate_color.onnx     
+├── plate_rec.onnx        # 字符识别 (输入: 1×3×48×160, 必需)
+├── plate_detect.onnx     # 全图检测 (输入: 1×3×320×320, full 模式必需)
+└── plate_color.onnx      # 颜色分类 (可选, 无则自动回退 HSV 启发式算法)
 ```
 
-### 3. 运行
+### 4. 运行
 
 **方式一：使用 Docker 运行（推荐，无视任何环境限制）**
 ```bash
-# 请将 v0.3.0 替换为最新版
-docker run -d -p 8080:8080 ghcr.io/vesaaa/platex:v0.3.0
+docker run -d -p 8080:8080 ghcr.io/vesaaa/platex:v0.5.1
 ```
 > 注：Docker 镜像内置了所有最新的 ONNX 模型文件，拉取即用，彻底免去手动下载和环境配置！
 
@@ -67,13 +66,13 @@ docker run -d -p 8080:8080 ghcr.io/vesaaa/platex:v0.3.0
 ./lpr-server -port 9090 -workers 8 -log-level debug
 ```
 
-### 4. 测试
+### 5. 测试
 
 ```bash
 # 健康检查
 curl http://localhost:8080/api/v1/health
 
-# 车牌识别 (Base64)
+# 车牌识别 (Base64, 默认 auto 缩放模式)
 curl -X POST http://localhost:8080/api/v1/recognize \
   -H "Content-Type: application/json" \
   -d '{
@@ -87,7 +86,7 @@ curl -X POST http://localhost:8080/api/v1/recognize \
     "mode": "crop"
   }'
 
-# 车牌识别 (文件路径)
+# 车牌识别 (文件路径, 指定 letterbox 缩放)
 curl -X POST http://localhost:8080/api/v1/recognize \
   -H "Content-Type: application/json" \
   -d '{
@@ -97,7 +96,10 @@ curl -X POST http://localhost:8080/api/v1/recognize \
         "type": "path",
         "data": "/data/plates/car001.jpg"
       }
-    ]
+    ],
+    "options": {
+      "resize_mode": "letterbox"
+    }
   }'
 ```
 
@@ -116,10 +118,35 @@ curl -X POST http://localhost:8080/api/v1/recognize \
   ],
   "mode": "crop",
   "options": {
-    "min_confidence": 0.6
+    "min_confidence": 0.6,
+    "resize_mode": "auto"
   }
 }
 ```
+
+**`options` 字段说明:**
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `min_confidence` | float | 0.6 | 最低置信度阈值，低于此值的结果将被过滤 |
+| `max_plates` | int | 10 | 单张图片最多返回的车牌数量 |
+| `resize_mode` | string | `"auto"` | 预处理缩放策略，见下表 |
+
+**`resize_mode` 缩放模式说明:**
+
+识别模型的输入尺寸固定为 `160×48`（宽高比 3.33:1）。当上游裁剪的车牌小图分辨率不固定时，不同的缩放策略会影响识别准确率：
+
+| 模式 | 行为 | 适用场景 |
+|------|------|----------|
+| `auto`（默认） | 智能判断：输入图片宽高比与 3.33:1 偏差 ≤10% 时用 `stretch`，>10% 时用 `letterbox` | **推荐！适合上游裁剪尺寸不固定的场景** |
+| `letterbox` | 等比缩放至 160×48 区域内，空余部分用灰色 (128) 填充，字符永不变形 | 追求极致准确率，或输入宽高比差异极大 |
+| `stretch` | 直接暴力拉伸到 160×48，速度最快但可能导致字符变形 | 已知裁剪比例恒定且接近 3.33:1 |
+
+示例：假设上游两种裁剪尺寸，`auto` 模式的自动决策：
+| 输入尺寸 | 宽高比 | 与 3.33 偏差 | auto 选择 | 原因 |
+|----------|--------|-------------|-----------|------|
+| 256×74 | 3.46:1 | 3.8% ≤ 10% | `stretch` | 比例接近，拉伸无畸变，更快 |
+| 192×48 | 4.00:1 | 20% > 10% | `letterbox` | 比例偏差大，需要保形填充 |
 
 **响应体:**
 ```json
@@ -149,10 +176,13 @@ curl -X POST http://localhost:8080/api/v1/recognize \
 ```
 
 **`type` 字段说明 (车牌规格):**
+
 系统会在识别后自动推算车牌的物理规格，方便业务层进行计费或分类拦截：
-- `standard_7`: **标准 7 位字符车牌**（如普通蓝牌、黄牌，例如 `粤B590MF`）
-- `new_energy`: **8 位字符新能源车牌**（通常伴随绿色，例如 `粤B123456D`）
-- `unknown`: **未知类型**（未识别完全、残缺或非标准车辆号牌）
+| 值 | 含义 | 示例 |
+|----|------|------|
+| `standard_7` | 标准 7 位字符车牌（蓝牌、黄牌、黑牌、白牌） | `粤B590MF` |
+| `new_energy` | 8 位字符新能源车牌（通常伴随绿色） | `粤BD12345` |
+| `unknown` | 未知类型（未识别完全、残缺或非标准号牌） | — |
 
 ### GET /api/v1/health
 
@@ -186,7 +216,13 @@ curl -X POST http://localhost:8080/api/v1/recognize \
 
 ## 部署
 
-### systemd 服务
+### Docker 部署（推荐）
+
+```bash
+docker run -d -p 8080:8080 ghcr.io/vesaaa/platex:v0.5.1
+```
+
+### systemd 服务（裸机）
 
 ```bash
 sudo cp lpr-server /opt/lpr/
@@ -196,9 +232,13 @@ sudo systemctl enable lpr-server
 sudo systemctl start lpr-server
 ```
 
-## 技术栈
+## 技术栈与依赖版本
 
-- **语言**: Go
-- **推理引擎**: ONNX Runtime
-- **模型**: HyperLPR3 (检测 + 识别 + 颜色)
-- **HTTP**: Go 标准库 net/http
+| 组件 | 版本 | 说明 |
+|------|------|------|
+| Go | 1.22 (LTS) | 编译工具链 |
+| ONNX Runtime (C++) | 1.18.1 | 底层推理引擎 |
+| onnxruntime_go | v1.11.0 (API 18) | Go 语言桥接库 |
+| 模型来源 | HyperLPR3 (20230229) | 检测 + 识别 + 颜色分类 |
+
+> **版本兼容说明**: Go 桥接库 `onnxruntime_go` 的版本号与底层 ORT C++ 库的 API 版本必须严格匹配。升级任一组件前，请参照 [onnxruntime_go](https://github.com/yalue/onnxruntime_go) 头文件中的 `ORT_API_VERSION` 定义进行对照。
