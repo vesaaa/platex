@@ -3,7 +3,6 @@ package engine
 import (
 	"fmt"
 	"image"
-	"log/slog"
 	"math"
 	"strings"
 

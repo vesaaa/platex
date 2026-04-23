@@ -15,8 +15,8 @@ import (
 type Model struct {
 	session      *ort.AdvancedSession
 	name         string
-	inputTensor  ort.ArbitraryTensor
-	outputTensor ort.ArbitraryTensor
+	inputTensor  *ort.Tensor[float32]
+	outputTensor *ort.Tensor[float32]
 }
 
 // initONNXRuntime initializes the ONNX Runtime shared library.
@@ -62,19 +62,6 @@ func loadModel(modelPath string, threads int, optLevel int) (*Model, error) {
 	if err := opts.SetIntraOpNumThreads(threads); err != nil {
 		return nil, fmt.Errorf("set threads: %w", err)
 	}
-
-	var gOptLevel ort.GraphOptimizationLevel
-	switch optLevel {
-	case 0:
-		gOptLevel = ort.GraphOptLevelDisableAll
-	case 1:
-		gOptLevel = ort.GraphOptLevelEnableBasic
-	case 2:
-		gOptLevel = ort.GraphOptLevelEnableExtended
-	default:
-		gOptLevel = ort.GraphOptLevelEnableAll
-	}
-	_ = opts.SetGraphOptimizationLevel(gOptLevel)
 
 	modelBytes, err := os.ReadFile(absPath)
 	if err != nil {
@@ -136,7 +123,7 @@ func (m *Model) RunInference(inputData []float32) ([]float32, error) {
 		return nil, fmt.Errorf("session is nil")
 	}
 
-	inData := m.inputTensor.GetData().([]float32)
+	inData := m.inputTensor.GetData()
 	if len(inputData) > len(inData) {
 		return nil, fmt.Errorf("input data too large for tensor: %d > %d", len(inputData), len(inData))
 	}
@@ -150,7 +137,7 @@ func (m *Model) RunInference(inputData []float32) ([]float32, error) {
 	}
 
 	// Copy output data out of the tensor
-	outData := m.outputTensor.GetData().([]float32)
+	outData := m.outputTensor.GetData()
 	result := make([]float32, len(outData))
 	copy(result, outData)
 
