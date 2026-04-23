@@ -24,8 +24,32 @@ build() {
     
     mkdir -p "build/${os}-${arch}"
     
+    # Download ONNX Runtime shared library for the target architecture
+    ORT_VERSION="1.17.1"
+    ORT_URL=""
+    if [ "${arch}" = "amd64" ]; then
+        ORT_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz"
+    elif [ "${arch}" = "arm64" ]; then
+        ORT_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-aarch64-${ORT_VERSION}.tgz"
+    fi
+
+    if [ ! -z "${ORT_URL}" ]; then
+        echo "   Downloading ONNX Runtime..."
+        curl -sL "${ORT_URL}" -o ort.tgz
+        tar -xzf ort.tgz
+        ORT_DIR=$(tar -tf ort.tgz | head -1 | cut -f1 -d"/")
+        
+        # Link against the downloaded library
+        export CGO_CFLAGS="-I$(pwd)/${ORT_DIR}/include"
+        export CGO_LDFLAGS="-L$(pwd)/${ORT_DIR}/lib -lonnxruntime"
+        
+        # Copy library to output for runtime
+        cp ${ORT_DIR}/lib/libonnxruntime.so* "build/${os}-${arch}/"
+        rm -rf ort.tgz ${ORT_DIR}
+    fi
+    
     CGO_ENABLED=1 GOOS=${os} GOARCH=${arch} \
-        go build -ldflags "${LDFLAGS}" \
+        go build -tags "${os}" -ldflags "${LDFLAGS}" \
         -o "${output}" \
         ./cmd/lpr-server/
 

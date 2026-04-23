@@ -53,17 +53,7 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 
 // runInference executes the ONNX model.
 func (r *Recognizer) runInference(input []float32) ([]float32, error) {
-	// TODO: Implement actual ONNX inference when model is available.
-	// For now, this is a placeholder that will be replaced with real model execution.
-	// The actual implementation will:
-	// 1. Copy input data to input tensor
-	// 2. Run session
-	// 3. Copy output data from output tensor
-	slog.Debug("Running recognizer inference", "input_size", len(input))
-
-	// Placeholder: return empty output (will be replaced with real inference)
-	outputSize := r.getOutputTimeSteps() * len(plateChars)
-	return make([]float32, outputSize), fmt.Errorf("model inference not yet implemented - models need to be downloaded")
+	return r.model.RunInference(input)
 }
 
 // getOutputTimeSteps returns the number of time steps in CRNN output.

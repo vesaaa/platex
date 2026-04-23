@@ -1,9 +1,10 @@
+//go:build !linux
+
 package engine
 
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 )
 
@@ -13,36 +14,32 @@ type Model struct {
 	filePath string
 }
 
-// loadModel loads an ONNX model file and validates it exists.
-// The actual ONNX Runtime session creation happens in platform-specific files.
+// loadModel loads an ONNX model file (Mock for Windows)
 func loadModel(modelPath string, threads int, optLevel int) (*Model, error) {
-	absPath, err := filepath.Abs(modelPath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve model path: %w", err)
-	}
-
-	if _, err := os.Stat(absPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("model file not found: %s", absPath)
-	}
-
 	name := filepath.Base(modelPath)
-	slog.Info("Loading ONNX model", "name", name, "path", absPath)
+	slog.Info("Loading ONNX model (Mock for Windows)", "name", name, "path", modelPath)
 
 	return &Model{
 		name:     name,
-		filePath: absPath,
+		filePath: modelPath,
 	}, nil
+}
+
+// RunInference executes the ONNX model (Mock for Windows).
+func (m *Model) RunInference(inputData []float32) ([]float32, error) {
+	slog.Warn("Running mock inference on Windows - please deploy to Linux for real ONNX acceleration")
+	return nil, fmt.Errorf("real model inference is only supported on Linux")
 }
 
 // Close releases the model resources.
 func (m *Model) Close() {
-	slog.Info("Model released", "name", m.name)
+	slog.Info("Model released (Mock)", "name", m.name)
 }
 
 // initONNXRuntime initializes the ONNX Runtime shared library.
 func initONNXRuntime(libraryPath string) error {
 	slog.Info("ONNX Runtime initialization",
-		"note", "Will use ONNX Runtime when available on Linux",
+		"note", "Using mock ONNX Runtime on Windows. Real ONNX will be used on Linux.",
 	)
 	return nil
 }

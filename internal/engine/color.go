@@ -62,10 +62,7 @@ func (c *ColorClassifier) Classify(img image.Image) (int, float32) {
 
 // runInference executes the color classification model.
 func (c *ColorClassifier) runInference(input []float32) ([]float32, error) {
-	slog.Debug("Running color classifier inference", "input_size", len(input))
-
-	// Placeholder: will be replaced with real inference
-	return make([]float32, len(plateColorLabels)), fmt.Errorf("color model inference not yet implemented")
+	return c.model.RunInference(input)
 }
 
 // argmaxWithConf returns the index of the maximum value and its softmax confidence.
