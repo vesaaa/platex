@@ -1,0 +1,4 @@
+
+                [console_scripts]
+                lpr3=hyperlpr3.command.cli:cli
+            

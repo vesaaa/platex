@@ -24,10 +24,10 @@ bash scripts/build.sh linux-arm64
 ```
 
 **方法二：无网环境手动下载**
-如果部署环境是内网，请手动下载以下 HyperLPR3 预训练模型并放置到运行目录的 `models/` 文件夹下：
-- [plate_rec.onnx](https://raw.githubusercontent.com/szad670401/HyperLPR/master/Prj-Python/hyperlpr3/resource/models/r2_mobile/plate_rec.onnx) (字符识别模型 - 必需)
-- [plate_detect.onnx](https://raw.githubusercontent.com/szad670401/HyperLPR/master/Prj-Python/hyperlpr3/resource/models/r2_mobile/plate_detect.onnx) (全图检测模型 - 全图模式必需)
-- [plate_color.onnx](https://raw.githubusercontent.com/szad670401/HyperLPR/master/Prj-Python/hyperlpr3/resource/models/r2_mobile/plate_color.onnx) (颜色分类模型 - 可选，若缺失则使用内置的HSV色彩推算作为回退)
+如果部署环境是内网，请手动下载以下 HyperLPR3 预训练模型，**下载后必须重命名为对应名称**，并放置到运行目录的 `models/` 文件夹下：
+- [plate_rec.onnx](http://hyperlpr.tunm.top/raw/20230229/onnx/rpv3_mdict_160_r3.onnx) (字符识别模型 - 必需)
+- [plate_detect.onnx](http://hyperlpr.tunm.top/raw/20230229/onnx/y5fu_320x_sim.onnx) (全图检测模型 - 全图模式必需)
+- [plate_color.onnx](http://hyperlpr.tunm.top/raw/20230229/onnx/litemodel_cls_96x_r1.onnx) (颜色分类模型 - 可选，若缺失则使用内置的HSV色彩推算作为回退)
 
 最终的目录结构应为：
 ```

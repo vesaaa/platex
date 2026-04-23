@@ -1,0 +1,25 @@
+Metadata-Version: 2.1
+Name: hyperlpr3
+Version: 0.1.3
+Summary: vehicle license plate recognition.
+Home-page: https://github.com/szad670401/HyperLPR
+Author: HyperInspire
+Author-email: tunmxy@163.com
+License: Apache License 2.0
+Keywords: vehicle license plate recognition
+Platform: UNKNOWN
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Requires-Dist: opencv-python
+Requires-Dist: onnxruntime
+Requires-Dist: tqdm
+Requires-Dist: requests
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: python-multipart
+Requires-Dist: loguru
+
+UNKNOWN
+
+

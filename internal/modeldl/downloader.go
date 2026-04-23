@@ -12,9 +12,9 @@ import (
 // ModelURLs contains the default download URLs for the models.
 // These point to the official HyperLPR3 repository or a fast CDN mirror.
 var ModelURLs = map[string]string{
-	"plate_rec.onnx":    "https://raw.githubusercontent.com/szad670401/HyperLPR/master/Prj-Python/hyperlpr3/resource/models/r2_mobile/plate_rec.onnx",
-	"plate_detect.onnx": "https://raw.githubusercontent.com/szad670401/HyperLPR/master/Prj-Python/hyperlpr3/resource/models/r2_mobile/plate_detect.onnx",
-	"plate_color.onnx":  "https://raw.githubusercontent.com/szad670401/HyperLPR/master/Prj-Python/hyperlpr3/resource/models/r2_mobile/plate_color.onnx",
+	"plate_rec.onnx":    "http://hyperlpr.tunm.top/raw/20230229/onnx/rpv3_mdict_160_r3.onnx",
+	"plate_detect.onnx": "http://hyperlpr.tunm.top/raw/20230229/onnx/y5fu_320x_sim.onnx",
+	"plate_color.onnx":  "http://hyperlpr.tunm.top/raw/20230229/onnx/litemodel_cls_96x_r1.onnx",
 }
 
 // DownloadModels downloads all required models to the specified directory.
