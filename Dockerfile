@@ -12,10 +12,13 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install certificates and any required dependencies for ONNX (e.g., OpenMP)
+# Install certificates and any required dependencies for ONNX C++ runtime
 RUN apt-get update && \
-    apt-get install -y ca-certificates libgomp1 curl && \
+    apt-get install -y ca-certificates libgomp1 libstdc++6 libgcc-s1 curl && \
     rm -rf /var/lib/apt/lists/*
+
+# Copy configs
+COPY configs/ /app/configs/
 
 # Copy the built Go binary and the ONNX shared library
 COPY --from=builder /app/build/linux-amd64/lpr-server /app/
