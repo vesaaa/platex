@@ -37,11 +37,14 @@ func NewRecognizer(modelPath string, threads, optLevel int) (*Recognizer, error)
 func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, error) {
 	// Determine resize strategy
 	useLetterbox := r.shouldUseLetterbox(img)
+	_ = useLetterbox // reserved for future use
 
-	// Preprocess: resize to model input size and convert to tensor
-	mean := [3]float32{0.485, 0.456, 0.406}
-	std := [3]float32{0.229, 0.224, 0.225}
-	tensor := imageToTensorCHW(img, r.inputWidth, r.inputHeight, mean, std, useLetterbox)
+	// Preprocess: match HyperLPR3's encode_images() exactly
+	// 1. Resize height to 48, width proportionally (capped at 160)
+	// 2. Normalize: (pixel - 127.5) / 127.5 → range [-1, 1]
+	// 3. Channel order: BGR (OpenCV convention)
+	// 4. Left-aligned zero-padding to fill 160 width
+	tensor := r.preprocessPlate(img)
 
 	// Run inference
 	output, err := r.runInference(tensor)
@@ -49,8 +52,9 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 		return "", nil, 0, fmt.Errorf("inference: %w", err)
 	}
 
-	// CTC decode
-	plateNumber, charConfs, avgConf := ctcDecode(output, r.getOutputTimeSteps(), len(plateChars))
+	// CTC decode: model outputs [40, 6625] but only first 77 indices are valid chars
+	numClasses := len(output) / r.getOutputTimeSteps() // = 6625
+	plateNumber, charConfs, avgConf := ctcDecode(output, r.getOutputTimeSteps(), numClasses)
 
 	return plateNumber, charConfs, avgConf, nil
 }
@@ -91,8 +95,8 @@ func ctcDecode(output []float32, timeSteps, numClasses int) (string, []float32, 
 			}
 		}
 
-		// Apply softmax-like confidence (the raw value after softmax)
-		conf := softmaxMax(output, t*numClasses, numClasses)
+		// Apply confidence (the raw value, which is already softmaxed by the model)
+		conf := maxVal
 
 		// CTC rules: skip blanks (index 0) and repeated characters
 		if maxIdx != 0 && maxIdx != prevIdx {
@@ -119,30 +123,6 @@ func ctcDecode(output []float32, timeSteps, numClasses int) (string, []float32, 
 	return plateNumber, confs, avgConf
 }
 
-// softmaxMax computes the softmax probability of the maximum element.
-func softmaxMax(data []float32, offset, size int) float32 {
-	maxVal := float32(-math.MaxFloat32)
-	for i := 0; i < size; i++ {
-		idx := offset + i
-		if idx < len(data) && data[idx] > maxVal {
-			maxVal = data[idx]
-		}
-	}
-
-	var sumExp float64
-	for i := 0; i < size; i++ {
-		idx := offset + i
-		if idx < len(data) {
-			sumExp += math.Exp(float64(data[idx] - maxVal))
-		}
-	}
-
-	if sumExp == 0 {
-		return 0
-	}
-	return float32(1.0 / sumExp)
-}
-
 // classifyPlateType determines the plate type from the recognized characters.
 func classifyPlateType(plateNumber string) types.PlateType {
 	runes := []rune(plateNumber)
@@ -154,6 +134,52 @@ func classifyPlateType(plateNumber string) types.PlateType {
 	default:
 		return types.PlateTypeUnknown
 	}
+}
+
+// preprocessPlate replicates HyperLPR3's encode_images() exactly:
+//   - Resize to height=48, width proportional (capped at 160, min 48)
+//   - Normalize: (pixel - 127.5) / 127.5 → [-1, 1]
+//   - Channel order: BGR
+//   - Left-aligned, zero-padded to full 160 width
+func (r *Recognizer) preprocessPlate(img image.Image) []float32 {
+	bounds := img.Bounds()
+	srcW := float64(bounds.Dx())
+	srcH := float64(bounds.Dy())
+
+	imgH := r.inputHeight // 48
+	imgW := r.inputWidth  // 160
+
+	// Calculate proportional width (same as Python: ratio_imgH)
+	ratio := srcW / srcH
+	resizedW := int(math.Ceil(float64(imgH) * ratio))
+	if resizedW < 48 {
+		resizedW = 48
+	}
+	if resizedW > imgW {
+		resizedW = imgW
+	}
+
+	// Resize to (resizedW, 48)
+	resized := resizeImage(img, resizedW, imgH)
+
+	// Create zero-padded tensor [3, 48, 160] in BGR order
+	tensor := make([]float32, 3*imgH*imgW) // all zeros = zero-padding
+	channelSize := imgH * imgW
+
+	for y := 0; y < imgH; y++ {
+		for x := 0; x < resizedW; x++ {
+			r, g, b, _ := resized.At(x, y).RGBA()
+			idx := y*imgW + x
+
+			// BGR order, normalize: (pixel - 127.5) / 127.5
+			tensor[0*channelSize+idx] = (float32(b>>8) - 127.5) / 127.5 // B
+			tensor[1*channelSize+idx] = (float32(g>>8) - 127.5) / 127.5 // G
+			tensor[2*channelSize+idx] = (float32(r>>8) - 127.5) / 127.5 // R
+		}
+	}
+	// Remaining columns (resizedW to 160) stay as 0.0 = zero-padding
+
+	return tensor
 }
 
 // shouldUseLetterbox decides the resize strategy based on resizeMode and image aspect ratio.
