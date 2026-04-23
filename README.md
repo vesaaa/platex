@@ -15,7 +15,14 @@ bash scripts/build.sh linux-amd64
 bash scripts/build.sh linux-arm64
 ```
 
-### 2. 下载模型
+### 2. 系统与环境要求 (裸机部署)
+
+如果你打算直接在物理机或虚拟机上裸跑（不使用 Docker），请确保系统满足以下条件：
+- **操作系统**：推荐 Ubuntu 20.04+ / Debian 11+ (基于 `glibc >= 2.31`)
+- **不支持旧系统**：**请勿在 CentOS 7 上直接运行预编译的 Release 包**（CentOS 7 的 `glibc` 为 `2.17`，版本过低，会导致找不到 `GLIBC_2.3x` 或 `libstdc++` 报错）。
+- **Docker 推荐**：如果必须在 CentOS 7 等老旧系统上部署，强烈建议使用 Docker 方案，完全屏蔽底层 C++ 库版本冲突！
+
+### 3. 下载模型
 
 **方法一：一键自动下载（推荐）**
 如果你部署的服务器有外网环境，可以直接运行以下命令，程序会自动从 GitHub 拉取所需模型并存入 `models/` 目录：
@@ -41,8 +48,16 @@ models/
 
 ### 3. 运行
 
+**方式一：使用 Docker 运行（推荐，无视任何环境限制）**
 ```bash
-# 使用默认配置
+# 请将 v0.3.0 替换为最新版
+docker run -d -p 8080:8080 ghcr.io/vesaaa/platex:v0.3.0
+```
+> 注：Docker 镜像内置了所有最新的 ONNX 模型文件，拉取即用，彻底免去手动下载和环境配置！
+
+**方式二：裸机直接运行**
+```bash
+# 确保 models/ 目录中已经有模型文件
 ./lpr-server
 
 # 指定配置文件
