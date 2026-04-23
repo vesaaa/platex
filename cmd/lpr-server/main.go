@@ -20,6 +20,7 @@ import (
 	"github.com/vesaa/platex/internal/api"
 	"github.com/vesaa/platex/internal/config"
 	"github.com/vesaa/platex/internal/engine"
+	"github.com/vesaa/platex/internal/modeldl"
 )
 
 const version = "0.1.0"
@@ -31,12 +32,23 @@ func main() {
 	host := flag.String("host", "", "Override server host")
 	workers := flag.Int("workers", 0, "Override worker count")
 	logLevel := flag.String("log-level", "", "Log level: debug, info, warn, error")
+	downloadModels := flag.Bool("download", false, "Download required ONNX models and exit")
 	flag.Parse()
 
 	// Setup logging
 	setupLogging(*logLevel)
 
-	slog.Info("Starting JSAI-LPR Server",
+	if *downloadModels {
+		slog.Info("Starting model download process...")
+		// Use the internal/modeldl package to download models to the "models" directory
+		if err := modeldl.DownloadModels("models"); err != nil {
+			slog.Error("Failed to download models", "error", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	slog.Info("Starting PlateX Server",
 		"version", version,
 		"pid", os.Getpid(),
 	)
