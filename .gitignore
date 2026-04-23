@@ -28,3 +28,6 @@ test_request.json
 # Logs
 *.log
 logs/
+20230229.zip  
+models_extracted/  
+hyperlpr3*/  
