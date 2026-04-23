@@ -25,7 +25,7 @@ build() {
     mkdir -p "build/${os}-${arch}"
     
     # Download ONNX Runtime shared library for the target architecture
-    ORT_VERSION="1.20.1"
+    ORT_VERSION="1.17.1"
     ORT_URL=""
     ORT_DIR=""
     if [ "${arch}" = "amd64" ]; then
