@@ -25,8 +25,8 @@ func initONNXRuntime(libraryPath string) error {
 		ort.SetSharedLibraryPath(libraryPath)
 	} else {
 		// Look for libonnxruntime.so in the current directory as a fallback
-		if _, err := os.Stat("./libonnxruntime.so.1.17.1"); err == nil {
-			ort.SetSharedLibraryPath("./libonnxruntime.so.1.17.1")
+		if _, err := os.Stat("./libonnxruntime.so.1.18.1"); err == nil {
+			ort.SetSharedLibraryPath("./libonnxruntime.so.1.18.1")
 		} else if _, err := os.Stat("./libonnxruntime.so"); err == nil {
 			ort.SetSharedLibraryPath("./libonnxruntime.so")
 		}
