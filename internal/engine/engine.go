@@ -149,12 +149,12 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, opts *types.Recognize
 	}
 	_ = minConf // Will be used when model is integrated
 
-	// Set resize mode: default to letterbox
+	// Set resize mode: default to auto
 	if e.recognizer != nil {
-		if opts != nil && opts.ResizeMode == "stretch" {
-			e.recognizer.useLetterbox = false
+		if opts != nil && opts.ResizeMode != "" {
+			e.recognizer.resizeMode = opts.ResizeMode
 		} else {
-			e.recognizer.useLetterbox = true
+			e.recognizer.resizeMode = "auto"
 		}
 	}
 

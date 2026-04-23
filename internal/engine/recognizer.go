@@ -11,10 +11,10 @@ import (
 
 // Recognizer handles license plate character recognition using CRNN model.
 type Recognizer struct {
-	model        *Model
-	inputWidth   int
-	inputHeight  int
-	useLetterbox bool
+	model      *Model
+	inputWidth  int
+	inputHeight int
+	resizeMode  string // "auto", "letterbox", or "stretch"
 }
 
 // NewRecognizer creates a new plate character recognizer.
@@ -25,20 +25,23 @@ func NewRecognizer(modelPath string, threads, optLevel int) (*Recognizer, error)
 	}
 
 	return &Recognizer{
-		model:        model,
-		inputWidth:   160, // HyperLPR3 rpv3_mdict model input width
-		inputHeight:  48,  // HyperLPR3 rpv3_mdict model input height
-		useLetterbox: true, // default to letterbox for best accuracy
+		model:      model,
+		inputWidth:  160, // HyperLPR3 rpv3_mdict model input width
+		inputHeight: 48,  // HyperLPR3 rpv3_mdict model input height
+		resizeMode:  "auto",
 	}, nil
 }
 
 // Recognize performs character recognition on a cropped plate image.
 // Returns the plate number string, per-character confidences, and overall confidence.
 func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, error) {
+	// Determine resize strategy
+	useLetterbox := r.shouldUseLetterbox(img)
+
 	// Preprocess: resize to model input size and convert to tensor
 	mean := [3]float32{0.485, 0.456, 0.406}
 	std := [3]float32{0.229, 0.224, 0.225}
-	tensor := imageToTensorCHW(img, r.inputWidth, r.inputHeight, mean, std, r.useLetterbox)
+	tensor := imageToTensorCHW(img, r.inputWidth, r.inputHeight, mean, std, useLetterbox)
 
 	// Run inference
 	output, err := r.runInference(tensor)
@@ -150,6 +153,26 @@ func classifyPlateType(plateNumber string) types.PlateType {
 		return types.PlateTypeStandard7
 	default:
 		return types.PlateTypeUnknown
+	}
+}
+
+// shouldUseLetterbox decides the resize strategy based on resizeMode and image aspect ratio.
+// In "auto" mode: if the input aspect ratio is within 10% of the model's target (3.33:1),
+// use stretch (faster, negligible distortion); otherwise use letterbox.
+func (r *Recognizer) shouldUseLetterbox(img image.Image) bool {
+	switch r.resizeMode {
+	case "stretch":
+		return false
+	case "letterbox":
+		return true
+	default: // "auto"
+		bounds := img.Bounds()
+		imgRatio := float64(bounds.Dx()) / float64(bounds.Dy())
+		modelRatio := float64(r.inputWidth) / float64(r.inputHeight) // 160/48 = 3.33
+
+		// If aspect ratio within 10% of target, stretch is fine
+		diff := math.Abs(imgRatio-modelRatio) / modelRatio
+		return diff > 0.10
 	}
 }
 
