@@ -17,13 +17,24 @@ bash scripts/build.sh linux-arm64
 
 ### 2. 下载模型
 
-将 HyperLPR3 的 ONNX 模型文件放到 `models/` 目录:
+**方法一：一键自动下载（推荐）**
+如果你部署的服务器有外网环境，可以直接运行以下命令，程序会自动从 GitHub 拉取所需模型并存入 `models/` 目录：
+```bash
+./lpr-server -download
+```
 
+**方法二：无网环境手动下载**
+如果部署环境是内网，请手动下载以下 HyperLPR3 预训练模型并放置到运行目录的 `models/` 文件夹下：
+- [plate_rec.onnx](https://raw.githubusercontent.com/szad670401/HyperLPR/master/Prj-Python/hyperlpr3/resource/models/r2_mobile/plate_rec.onnx) (字符识别模型 - 必需)
+- [plate_detect.onnx](https://raw.githubusercontent.com/szad670401/HyperLPR/master/Prj-Python/hyperlpr3/resource/models/r2_mobile/plate_detect.onnx) (全图检测模型 - 全图模式必需)
+- [plate_color.onnx](https://raw.githubusercontent.com/szad670401/HyperLPR/master/Prj-Python/hyperlpr3/resource/models/r2_mobile/plate_color.onnx) (颜色分类模型 - 可选，若缺失则使用内置的HSV色彩推算作为回退)
+
+最终的目录结构应为：
 ```
 models/
-├── plate_rec.onnx       # 字符识别模型 (必需)
-├── plate_detect.onnx    # 车牌检测模型 (全图模式需要)
-└── plate_color.onnx     # 颜色分类模型 (可选，有HSV回退)
+├── plate_rec.onnx       
+├── plate_detect.onnx    
+└── plate_color.onnx     
 ```
 
 ### 3. 运行
@@ -105,7 +116,7 @@ curl -X POST http://localhost:8080/api/v1/recognize \
         "plates": [
           {
             "plate_number": "粤B590MF",
-            "color": 0,
+            "color": 3,
             "color_name": "蓝色",
             "confidence": 0.97,
             "type": "standard_7"
