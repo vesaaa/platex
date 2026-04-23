@@ -5,22 +5,36 @@ package types
 type PlateColor int
 
 const (
-	ColorBlue  PlateColor = 0 // 蓝色 - 普通小型车
-	ColorYellow PlateColor = 1 // 黄色 - 大型车辆/教练车
-	ColorGreen PlateColor = 2 // 绿色 - 新能源
-	ColorBlack PlateColor = 3 // 黑色 - 使馆/港澳
-	ColorWhite PlateColor = 4 // 白色 - 军用/警用
-	ColorOther PlateColor = 5 // 其他
+	ColorOther  PlateColor = 0  // 0 其他
+	ColorWhite  PlateColor = 1  // 1 白色
+	ColorBlack  PlateColor = 2  // 2 黑色
+	ColorBlue   PlateColor = 3  // 3 蓝色
+	ColorYellow PlateColor = 4  // 4 黄色
+	ColorGreen  PlateColor = 5  // 5 绿色
+	ColorRed    PlateColor = 6  // 6 红色
+	ColorOrange PlateColor = 7  // 7 橙色
+	ColorPurple PlateColor = 8  // 8 紫色
+	ColorGrey   PlateColor = 9  // 9 灰色
+	ColorSilver PlateColor = 10 // 10 银色
+	ColorBrown  PlateColor = 11 // 11 棕色
+	ColorPink   PlateColor = 12 // 12 粉色
 )
 
 // ColorNames maps PlateColor to Chinese name.
 var ColorNames = map[PlateColor]string{
+	ColorOther:  "其他",
+	ColorWhite:  "白色",
+	ColorBlack:  "黑色",
 	ColorBlue:   "蓝色",
 	ColorYellow: "黄色",
 	ColorGreen:  "绿色",
-	ColorBlack:  "黑色",
-	ColorWhite:  "白色",
-	ColorOther:  "其他",
+	ColorRed:    "红色",
+	ColorOrange: "橙色",
+	ColorPurple: "紫色",
+	ColorGrey:   "灰色",
+	ColorSilver: "银色",
+	ColorBrown:  "棕色",
+	ColorPink:   "粉色",
 }
 
 // PlateType represents the type of license plate.

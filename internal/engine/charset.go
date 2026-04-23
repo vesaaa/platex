@@ -18,10 +18,10 @@ var plateChars = []string{
 
 // plateColorLabels maps model output index to color code.
 var plateColorLabels = []int{
-	0, // Blue
-	1, // Yellow
-	2, // Green
-	3, // Black
-	4, // White
-	5, // Other
+	3, // Blue (Model output 0 -> ColorBlue 3)
+	4, // Yellow (Model output 1 -> ColorYellow 4)
+	5, // Green (Model output 2 -> ColorGreen 5)
+	2, // Black (Model output 3 -> ColorBlack 2)
+	1, // White (Model output 4 -> ColorWhite 1)
+	0, // Other (Model output 5 -> ColorOther 0)
 }

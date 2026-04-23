@@ -169,8 +169,8 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 			"new_energy  - 新能源8位车牌 (绿)",
 		},
 		"supported_colors": map[int]string{
-			0: "蓝色", 1: "黄色", 2: "绿色",
-			3: "黑色", 4: "白色", 5: "其他",
+			0: "其他", 1: "白色", 2: "黑色", 3: "蓝色", 4: "黄色", 5: "绿色",
+			6: "红色", 7: "橙色", 8: "紫色", 9: "灰色", 10: "银色", 11: "棕色", 12: "粉色",
 		},
 		"input_types": []string{"base64", "path"},
 		"modes":       []string{"crop", "full"},

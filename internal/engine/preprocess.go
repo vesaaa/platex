@@ -99,7 +99,7 @@ func getDominantColor(img image.Image) int {
 	}
 
 	if count == 0 {
-		return 5 // Other
+		return 0 // Other
 	}
 
 	avgR := totalR / count
@@ -112,17 +112,17 @@ func getDominantColor(img image.Image) int {
 	// Classification rules based on HSV
 	switch {
 	case v < 50:
-		return 3 // Black
+		return 2 // Black
 	case s < 30 && v > 180:
-		return 4 // White
+		return 1 // White
 	case h >= 100 && h <= 140 && s > 50:
-		return 0 // Blue
+		return 3 // Blue
 	case (h >= 40 && h <= 70) && s > 50:
-		return 1 // Yellow
+		return 4 // Yellow
 	case (h >= 70 && h <= 170) && s > 30:
-		return 2 // Green
+		return 5 // Green
 	default:
-		return 5 // Other
+		return 0 // Other
 	}
 }
 
