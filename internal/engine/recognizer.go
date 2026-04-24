@@ -99,6 +99,9 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 		return "", nil, 0, fmt.Errorf("inference: no valid candidate")
 	}
 
+	// Stage 3 (recovery only): lightweight ambiguous-char rerank.
+	best.plate, best.confs, best.score = rerankAmbiguousPlate(best.plate, best.confs, best.score)
+
 	slog.Info("Recognition result", "plate", best.plate, "conf", best.conf, "steps", r.timeSteps, "classes", r.numClasses)
 	return best.plate, best.confs, best.conf, nil
 }
@@ -246,6 +249,48 @@ func scorePlateCandidate(plate string, conf float32) float32 {
 	}
 	score += mainlandFormatScore(r)
 	return score
+}
+
+func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (string, []float32, float32) {
+	r := []rune(strings.TrimSpace(plate))
+	if len(r) != 7 || len(confs) != len(r) || !looksLikeMainlandPlatePrefix(r) {
+		return plate, confs, baseScore
+	}
+
+	bestPlate := plate
+	bestConfs := append([]float32(nil), confs...)
+	bestScore := baseScore
+
+	// Candidate A: repeated-digit tail often comes from Y/6 confusion in tilted crops.
+	// Example: 粤L02166 -> 粤L021Y6
+	if unicode.IsDigit(r[4]) && unicode.IsDigit(r[5]) && unicode.IsDigit(r[6]) && r[5] == r[6] {
+		cand := append([]rune(nil), r...)
+		cand[5] = 'Y'
+		candConfs := append([]float32(nil), confs...)
+		if candConfs[5] < 0.70 {
+			candConfs[5] = 0.70
+		}
+		// small penalty for replacement, but allow structural gain to win
+		candScore := scorePlateCandidate(string(cand), meanConfs(candConfs)) - 0.8
+		if candScore > bestScore {
+			bestScore = candScore
+			bestPlate = string(cand)
+			bestConfs = candConfs
+		}
+	}
+
+	return bestPlate, bestConfs, bestScore
+}
+
+func meanConfs(confs []float32) float32 {
+	if len(confs) == 0 {
+		return 0
+	}
+	var sum float32
+	for _, c := range confs {
+		sum += c
+	}
+	return sum / float32(len(confs))
 }
 
 func mainlandFormatScore(r []rune) float32 {
