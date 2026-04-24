@@ -4,7 +4,15 @@
 
 set -e
 
-VERSION=${VERSION:-"0.1.0"}
+if [ -z "${VERSION}" ]; then
+    if [ ! -z "${GITHUB_REF_NAME}" ]; then
+        VERSION="${GITHUB_REF_NAME}"
+    else
+        VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
+    fi
+fi
+# Normalize version like "v0.5.11" -> "0.5.11"
+VERSION="${VERSION#v}"
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 

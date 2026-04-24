@@ -23,7 +23,11 @@ import (
 	"github.com/vesaa/platex/internal/modeldl"
 )
 
-const version = "0.1.0"
+var (
+	version   = "dev"
+	buildTime = "unknown"
+	gitCommit = "unknown"
+)
 
 func main() {
 	// Command line flags
@@ -50,6 +54,8 @@ func main() {
 
 	slog.Info("Starting PlateX Server",
 		"version", version,
+		"build_time", buildTime,
+		"git_commit", gitCommit,
 		"pid", os.Getpid(),
 	)
 

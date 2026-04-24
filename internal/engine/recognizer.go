@@ -54,25 +54,28 @@ func NewRecognizer(modelPath string, threads, optLevel int) (*Recognizer, error)
 // Recognize performs character recognition on a cropped plate image.
 // Returns the plate number string, per-character confidences, and overall confidence.
 func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, error) {
-	candidates := r.candidateAngles(img)
 	best := recognizeCandidateResult{score: float32(-1e9)}
+	crops := r.candidateCrops(img)
+	angles := r.candidateAngles(img)
 
-	for _, angle := range candidates {
-		candImg := img
-		if angle != 0 {
-			candImg = rotateImageGrayBG(img, angle)
-		}
-		plateNumber, charConfs, avgConf, err := r.recognizeSingleAngle(candImg)
-		if err != nil {
-			continue
-		}
-		score := scorePlateCandidate(plateNumber, avgConf)
-		if score > best.score {
-			best = recognizeCandidateResult{
-				plate: plateNumber,
-				confs: charConfs,
-				conf:  avgConf,
-				score: score,
+	for _, cimg := range crops {
+		for _, angle := range angles {
+			candImg := cimg
+			if angle != 0 {
+				candImg = rotateImageGrayBG(cimg, angle)
+			}
+			plateNumber, charConfs, avgConf, err := r.recognizeSingleAngle(candImg)
+			if err != nil {
+				continue
+			}
+			score := scorePlateCandidate(plateNumber, avgConf)
+			if score > best.score {
+				best = recognizeCandidateResult{
+					plate: plateNumber,
+					confs: charConfs,
+					conf:  avgConf,
+					score: score,
+				}
 			}
 		}
 	}
@@ -83,6 +86,68 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 
 	slog.Info("Recognition result", "plate", best.plate, "conf", best.conf, "steps", r.timeSteps, "classes", r.numClasses)
 	return best.plate, best.confs, best.conf, nil
+}
+
+func (r *Recognizer) candidateCrops(img image.Image) []image.Image {
+	b := img.Bounds()
+	w := b.Dx()
+	h := b.Dy()
+	if h == 0 {
+		return []image.Image{img}
+	}
+	ratio := float64(w) / float64(h)
+	if ratio >= 2.2 {
+		return []image.Image{img}
+	}
+	// For square-ish inputs, include slight left-shift crops to focus on plate body.
+	cands := []image.Image{
+		img,
+		cropWithOffset(img, 0.72, -0.25, 0),
+		cropWithOffset(img, 0.68, -0.25, 0),
+		cropWithOffset(img, 0.64, -0.25, 0),
+		cropWithOffset(img, 0.60, -0.25, 0),
+		cropWithOffset(img, 0.72, -0.15, 0),
+		cropWithOffset(img, 0.68, -0.15, 0),
+	}
+	return cands
+}
+
+func cropWithOffset(src image.Image, ratio, xOffset, yOffset float64) image.Image {
+	if ratio >= 0.999 || ratio <= 0 {
+		return src
+	}
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	cw := int(float64(w) * ratio)
+	ch := int(float64(h) * ratio)
+	if cw < 8 || ch < 8 {
+		return src
+	}
+	maxShiftX := (w - cw) / 2
+	maxShiftY := (h - ch) / 2
+	shiftX := int(float64(maxShiftX) * xOffset)
+	shiftY := int(float64(maxShiftY) * yOffset)
+	x0 := b.Min.X + (w-cw)/2 + shiftX
+	y0 := b.Min.Y + (h-ch)/2 + shiftY
+	if x0 < b.Min.X {
+		x0 = b.Min.X
+	}
+	if y0 < b.Min.Y {
+		y0 = b.Min.Y
+	}
+	if x0+cw > b.Max.X {
+		x0 = b.Max.X - cw
+	}
+	if y0+ch > b.Max.Y {
+		y0 = b.Max.Y - ch
+	}
+	dst := image.NewNRGBA(image.Rect(0, 0, cw, ch))
+	for y := 0; y < ch; y++ {
+		for x := 0; x < cw; x++ {
+			dst.Set(x, y, src.At(x0+x, y0+y))
+		}
+	}
+	return dst
 }
 
 type recognizeCandidateResult struct {
@@ -118,9 +183,16 @@ func (r *Recognizer) candidateAngles(img image.Image) []float64 {
 	ratio := float64(w) / float64(h)
 	// Square-ish/tilted crops need more angle search.
 	if ratio < 2.2 {
-		return []float64{0, -12, 12, -8, 8, -4, 4}
+		return []float64{
+			0,
+			-30, -25, -20, -16, -12, -8, -4,
+			4, 8, 12, 16, 20, 25, 30,
+		}
 	}
-	return []float64{0, -8, 8}
+	if ratio < 3.0 {
+		return []float64{0, -18, -12, -8, -4, 4, 8, 12, 18}
+	}
+	return []float64{0, -12, -8, -4, 4, 8, 12}
 }
 
 func scorePlateCandidate(plate string, conf float32) float32 {
@@ -145,6 +217,32 @@ func scorePlateCandidate(plate string, conf float32) float32 {
 		score += 6
 	} else {
 		score -= 10
+	}
+	score += mainlandFormatScore(r)
+	return score
+}
+
+func mainlandFormatScore(r []rune) float32 {
+	// Prefer canonical mainland plate patterns:
+	// 7-char: [汉][A-Z][A-Z0-9]{5}
+	// 8-char(new-energy): [汉][A-Z][A-Z0-9]{6}
+	if len(r) != 7 && len(r) != 8 {
+		return -8
+	}
+	if !isChineseRune(r[0]) || !isASCIILetter(r[1]) {
+		return -12
+	}
+	score := float32(0)
+	for i := 2; i < len(r); i++ {
+		ch := r[i]
+		if isASCIILetter(ch) || unicode.IsDigit(ch) {
+			score += 1.8
+		} else {
+			score -= 3
+		}
+	}
+	if len(r) == 8 {
+		score += 2 // slight preference for recognized new-energy length
 	}
 	return score
 }

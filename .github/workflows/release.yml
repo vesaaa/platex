@@ -30,6 +30,8 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build for Linux AMD64
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
           bash scripts/build.sh linux-amd64
           cd build/linux-amd64
@@ -37,6 +39,8 @@ jobs:
           cd ../../
 
       - name: Build for Linux ARM64
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
           bash scripts/build.sh linux-arm64
           cd build/linux-arm64
