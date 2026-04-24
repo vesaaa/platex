@@ -132,12 +132,15 @@ func (r *Recognizer) candidateCrops(img image.Image) []image.Image {
 	// For square-ish inputs, include slight left-shift crops to focus on plate body.
 	cands := []image.Image{
 		img,
+		trimWhiteFrame(img),
 		cropWithOffset(img, 0.72, -0.25, 0),
 		cropWithOffset(img, 0.68, -0.25, 0),
 		cropWithOffset(img, 0.64, -0.25, 0),
 		cropWithOffset(img, 0.60, -0.25, 0),
 		cropWithOffset(img, 0.72, -0.15, 0),
 		cropWithOffset(img, 0.68, -0.15, 0),
+		trimWhiteFrame(cropWithOffset(img, 0.72, -0.25, 0)),
+		trimWhiteFrame(cropWithOffset(img, 0.68, -0.25, 0)),
 	}
 	return cands
 }
@@ -175,6 +178,87 @@ func cropWithOffset(src image.Image, ratio, xOffset, yOffset float64) image.Imag
 	for y := 0; y < ch; y++ {
 		for x := 0; x < cw; x++ {
 			dst.Set(x, y, src.At(x0+x, y0+y))
+		}
+	}
+	return dst
+}
+
+// trimWhiteFrame removes bright border regions to reduce frame-stroke interference.
+func trimWhiteFrame(src image.Image) image.Image {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w < 20 || h < 20 {
+		return src
+	}
+	isBright := func(x, y int) bool {
+		r, g, bl, _ := src.At(x, y).RGBA()
+		rr := int(r >> 8)
+		gg := int(g >> 8)
+		bb := int(bl >> 8)
+		return rr > 210 && gg > 210 && bb > 210
+	}
+	// scan edges until non-bright dominance
+	left, right := b.Min.X, b.Max.X-1
+	top, bottom := b.Min.Y, b.Max.Y-1
+	thresholdCol := int(float64(h) * 0.88)
+	thresholdRow := int(float64(w) * 0.88)
+
+	for x := b.Min.X; x < b.Max.X; x++ {
+		bright := 0
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			if isBright(x, y) {
+				bright++
+			}
+		}
+		if bright < thresholdCol {
+			left = x
+			break
+		}
+	}
+	for x := b.Max.X - 1; x >= b.Min.X; x-- {
+		bright := 0
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			if isBright(x, y) {
+				bright++
+			}
+		}
+		if bright < thresholdCol {
+			right = x
+			break
+		}
+	}
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		bright := 0
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if isBright(x, y) {
+				bright++
+			}
+		}
+		if bright < thresholdRow {
+			top = y
+			break
+		}
+	}
+	for y := b.Max.Y - 1; y >= b.Min.Y; y-- {
+		bright := 0
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if isBright(x, y) {
+				bright++
+			}
+		}
+		if bright < thresholdRow {
+			bottom = y
+			break
+		}
+	}
+	if right-left < 16 || bottom-top < 16 {
+		return src
+	}
+	rect := image.Rect(left, top, right+1, bottom+1)
+	dst := image.NewNRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
+	for y := 0; y < rect.Dy(); y++ {
+		for x := 0; x < rect.Dx(); x++ {
+			dst.Set(x, y, src.At(rect.Min.X+x, rect.Min.Y+y))
 		}
 	}
 	return dst
@@ -371,6 +455,15 @@ func mainlandFormatScore(r []rune) float32 {
 			score += 1.8
 		} else {
 			score -= 3
+		}
+	}
+	// Encourage D-L-D tail over L-D-D in 7-char pattern for difficult tilted samples.
+	if len(r) == 7 {
+		if unicode.IsDigit(r[4]) && isASCIILetter(r[5]) && unicode.IsDigit(r[6]) {
+			score += 1.6
+		}
+		if isASCIILetter(r[4]) && unicode.IsDigit(r[5]) && unicode.IsDigit(r[6]) {
+			score -= 1.2
 		}
 	}
 	if len(r) == 8 {
