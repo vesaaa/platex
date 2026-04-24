@@ -22,3 +22,12 @@ func TestCandidateCropsForSquareInput(t *testing.T) {
 	}
 }
 
+func TestNeedRecoverySearch(t *testing.T) {
+	if !needRecoverySearch("浙B9", 0.63) {
+		t.Fatalf("expected short malformed plate to require recovery")
+	}
+	if needRecoverySearch("粤B590MF", 0.92) {
+		t.Fatalf("expected high-quality normal plate to skip recovery")
+	}
+}
+

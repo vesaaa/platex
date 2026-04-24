@@ -54,26 +54,41 @@ func NewRecognizer(modelPath string, threads, optLevel int) (*Recognizer, error)
 // Recognize performs character recognition on a cropped plate image.
 // Returns the plate number string, per-character confidences, and overall confidence.
 func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, error) {
-	best := recognizeCandidateResult{score: float32(-1e9)}
+	// Stage 1: fast path for normal images.
+	plateNumber, charConfs, avgConf, err := r.recognizeSingleAngle(img)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	if !needRecoverySearch(plateNumber, avgConf) {
+		slog.Info("Recognition result", "plate", plateNumber, "conf", avgConf, "steps", r.timeSteps, "classes", r.numClasses)
+		return plateNumber, charConfs, avgConf, nil
+	}
+
+	// Stage 2: expensive candidate search only for abnormal outputs.
+	best := recognizeCandidateResult{
+		plate: plateNumber,
+		confs: charConfs,
+		conf:  avgConf,
+		score: scorePlateCandidate(plateNumber, avgConf),
+	}
 	crops := r.candidateCrops(img)
 	angles := r.candidateAngles(img)
-
 	for _, cimg := range crops {
 		for _, angle := range angles {
 			candImg := cimg
 			if angle != 0 {
 				candImg = rotateImageGrayBG(cimg, angle)
 			}
-			plateNumber, charConfs, avgConf, err := r.recognizeSingleAngle(candImg)
-			if err != nil {
+			pn, pc, cf, e := r.recognizeSingleAngle(candImg)
+			if e != nil {
 				continue
 			}
-			score := scorePlateCandidate(plateNumber, avgConf)
+			score := scorePlateCandidate(pn, cf)
 			if score > best.score {
 				best = recognizeCandidateResult{
-					plate: plateNumber,
-					confs: charConfs,
-					conf:  avgConf,
+					plate: pn,
+					confs: pc,
+					conf:  cf,
 					score: score,
 				}
 			}
@@ -86,6 +101,17 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 
 	slog.Info("Recognition result", "plate", best.plate, "conf", best.conf, "steps", r.timeSteps, "classes", r.numClasses)
 	return best.plate, best.confs, best.conf, nil
+}
+
+func needRecoverySearch(plate string, conf float32) bool {
+	r := []rune(strings.TrimSpace(plate))
+	if len(r) < 6 {
+		return true
+	}
+	if !looksLikeMainlandPlatePrefix(r) {
+		return true
+	}
+	return conf < 0.70
 }
 
 func (r *Recognizer) candidateCrops(img image.Image) []image.Image {
@@ -328,23 +354,6 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 		confs[len(confs)-1] >= 0.65 {
 		r = append(r, r[len(r)-1])
 		confs = append(confs, confs[len(confs)-1]*0.95)
-	}
-
-	// Soft correction 4:
-	// For 7-char mainland plates, when the last two chars are repeated digits and the
-	// penultimate char confidence is relatively low, prefer letter-digit ending (Y6-like).
-	// Example: 粤L02166 -> 粤L021Y6
-	if len(r) == 7 &&
-		looksLikeMainlandPlatePrefix(r) &&
-		unicode.IsDigit(r[5]) &&
-		unicode.IsDigit(r[6]) &&
-		r[5] == r[6] &&
-		confs[5] < 0.88 &&
-		confs[6] >= 0.80 {
-		r[5] = 'Y'
-		if confs[5] < 0.72 {
-			confs[5] = 0.72
-		}
 	}
 
 	return string(r), confs

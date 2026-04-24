@@ -41,13 +41,4 @@ func TestNormalizePlateNumberWithConfidence_AppendLastDigitForLen6(t *testing.T)
 	}
 }
 
-func TestNormalizePlateNumberWithConfidence_DoubleDigitTailToY6(t *testing.T) {
-	in := "粤L02166"
-	want := "粤L021Y6"
-	confs := []float32{0.96, 0.93, 0.90, 0.89, 0.88, 0.74, 0.91}
-	got, _ := normalizePlateNumberWithConfidence(in, confs)
-	if got != want {
-		t.Fatalf("normalizePlateNumberWithConfidence(%q)=%q, want=%q", in, got, want)
-	}
-}
 
