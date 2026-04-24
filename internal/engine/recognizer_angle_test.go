@@ -71,8 +71,17 @@ func TestRecoveryVariants(t *testing.T) {
 	r := &Recognizer{}
 	img := image.NewNRGBA(image.Rect(0, 0, 32, 16))
 	variants := r.recoveryVariants(img)
-	if len(variants) < 4 {
-		t.Fatalf("expected at least 4 recovery variants, got %d", len(variants))
+	if len(variants) < 3 {
+		t.Fatalf("expected at least 3 recovery variants, got %d", len(variants))
+	}
+}
+
+func TestStripInnerProvinceNoise(t *testing.T) {
+	in := []rune("粤A粤L7G22")
+	confs := []float32{0.95, 0.90, 0.88, 0.91, 0.87, 0.86, 0.90, 0.92}
+	out, _ := stripInnerProvinceNoise(in, confs)
+	if string(out) != "粤AL7G22" {
+		t.Fatalf("unexpected stripped result: %s", string(out))
 	}
 }
 

@@ -96,10 +96,14 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 						conf:  cf,
 						score: score,
 					}
+					if isHighQualityCandidate(best.plate, best.score) {
+						goto RECOVERY_DONE
+					}
 				}
 			}
 		}
 	}
+RECOVERY_DONE:
 
 	if best.score <= float32(-1e8) {
 		return "", nil, 0, fmt.Errorf("inference: no valid candidate")
@@ -126,7 +130,6 @@ func needRecoverySearch(plate string, conf float32) bool {
 func (r *Recognizer) recoveryVariants(img image.Image) []image.Image {
 	return []image.Image{
 		img,
-		enhanceGrayContrast(img),
 		unsharpMask(img),
 		adaptiveGrayBoost(img),
 	}
@@ -149,12 +152,8 @@ func (r *Recognizer) candidateCrops(img image.Image) []image.Image {
 		trimWhiteFrame(img),
 		cropWithOffset(img, 0.72, -0.25, 0),
 		cropWithOffset(img, 0.68, -0.25, 0),
-		cropWithOffset(img, 0.64, -0.25, 0),
-		cropWithOffset(img, 0.60, -0.25, 0),
 		cropWithOffset(img, 0.72, -0.15, 0),
-		cropWithOffset(img, 0.68, -0.15, 0),
 		trimWhiteFrame(cropWithOffset(img, 0.72, -0.25, 0)),
-		trimWhiteFrame(cropWithOffset(img, 0.68, -0.25, 0)),
 	}
 	return cands
 }
@@ -466,14 +465,14 @@ func (r *Recognizer) candidateAngles(img image.Image) []float64 {
 	if ratio < 2.2 {
 		return []float64{
 			0,
-			-30, -25, -20, -16, -12, -8, -4,
-			4, 8, 12, 16, 20, 25, 30,
+			-20, -12, -8, -4,
+			4, 8, 12, 20,
 		}
 	}
 	if ratio < 3.0 {
-		return []float64{0, -18, -12, -8, -4, 4, 8, 12, 18}
+		return []float64{0, -12, -8, -4, 4, 8, 12}
 	}
-	return []float64{0, -12, -8, -4, 4, 8, 12}
+	return []float64{0, -8, -4, 4, 8}
 }
 
 func scorePlateCandidate(plate string, conf float32) float32 {
@@ -587,6 +586,25 @@ func meanConfs(confs []float32) float32 {
 		sum += c
 	}
 	return sum / float32(len(confs))
+}
+
+func stripInnerProvinceNoise(r []rune, confs []float32) ([]rune, []float32) {
+	if len(r) < 8 || !looksLikeMainlandPlatePrefix(r) {
+		return r, confs
+	}
+	for i := 2; i < len(r); i++ {
+		if !isChineseRune(r[i]) {
+			continue
+		}
+		candR := append([]rune(nil), r[:i]...)
+		candR = append(candR, r[i+1:]...)
+		candC := append([]float32(nil), confs[:i]...)
+		candC = append(candC, confs[i+1:]...)
+		if len(candR) >= 7 && looksLikeMainlandPlatePrefix(candR) {
+			return candR, candC
+		}
+	}
+	return r, confs
 }
 
 func upscaleImage(src image.Image, scale int) image.Image {
@@ -733,7 +751,7 @@ func mainlandFormatScore(r []rune) float32 {
 		if isASCIILetter(ch) || unicode.IsDigit(ch) {
 			score += 1.8
 		} else {
-			score -= 3
+			score -= 6.5
 		}
 	}
 	// Encourage D-L-D tail over L-D-D in 7-char pattern for difficult tilted samples.
@@ -749,6 +767,17 @@ func mainlandFormatScore(r []rune) float32 {
 		score += 2 // slight preference for recognized new-energy length
 	}
 	return score
+}
+
+func isHighQualityCandidate(plate string, score float32) bool {
+	r := []rune(strings.TrimSpace(plate))
+	if len(r) != 7 && len(r) != 8 {
+		return false
+	}
+	if !looksLikeMainlandPlatePrefix(r) {
+		return false
+	}
+	return score > 88
 }
 
 func rotateImageGrayBG(src image.Image, angleDeg float64) image.Image {
@@ -794,6 +823,9 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 	if len(r) < 2 || len(confs) != len(r) {
 		return s, confs
 	}
+
+	// Strip likely spurious province glyph that appears after the prefix.
+	r, confs = stripInnerProvinceNoise(r, confs)
 
 	// Soft correction 1:
 	// Collapse duplicated province prefix only when the duplicate has low confidence.
