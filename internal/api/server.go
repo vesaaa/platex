@@ -172,7 +172,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 			0: "其他", 1: "白色", 2: "黑色", 3: "蓝色", 4: "黄色", 5: "绿色",
 			6: "红色", 7: "橙色", 8: "紫色", 9: "灰色", 10: "银色", 11: "棕色", 12: "粉色",
 		},
-		"input_types": []string{"base64", "path"},
+		"input_types": []string{"base64", "path", "url"},
 		"modes":       []string{"crop", "full"},
 	}
 

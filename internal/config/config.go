@@ -32,6 +32,7 @@ type EngineConfig struct {
 	Models  ModelsConfig `yaml:"models"`
 	ONNX    ONNXConfig   `yaml:"onnx"`
 	Rec     RecConfig    `yaml:"recognition"`
+	URL     URLConfig    `yaml:"url"`
 }
 
 // ModelsConfig holds model file paths.
@@ -51,6 +52,16 @@ type ONNXConfig struct {
 type RecConfig struct {
 	MinConfidence float32 `yaml:"min_confidence"`
 	MaxPlates     int     `yaml:"max_plates"`
+}
+
+// URLConfig holds settings for URL image input fetching.
+type URLConfig struct {
+	Enabled             bool   `yaml:"enabled"`
+	FetchTimeoutMs      int    `yaml:"fetch_timeout_ms"`
+	MaxImageBytes       int64  `yaml:"max_image_bytes"`
+	MaxFetchConcurrency int    `yaml:"max_fetch_concurrency"`
+	BlockPrivateIP      bool   `yaml:"block_private_ip"`
+	AllowedSchemes      []string `yaml:"allowed_schemes"`
 }
 
 // LogConfig holds logging settings.
@@ -89,6 +100,14 @@ func DefaultConfig() *Config {
 			Rec: RecConfig{
 				MinConfidence: 0.6,
 				MaxPlates:     10,
+			},
+			URL: URLConfig{
+				Enabled:             true,
+				FetchTimeoutMs:      1200,
+				MaxImageBytes:       5 * 1024 * 1024,
+				MaxFetchConcurrency: 16,
+				BlockPrivateIP:      true,
+				AllowedSchemes:      []string{"http", "https"},
 			},
 		},
 		Log: LogConfig{

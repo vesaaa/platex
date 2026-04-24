@@ -31,6 +31,20 @@ engine:
     # 全图模式下单图最大车牌数
     max_plates: 10
 
+  url:
+    # 是否启用 type=url 的网络图片输入
+    enabled: true
+    # 单张图片下载超时 (毫秒)
+    fetch_timeout_ms: 1200
+    # 单张图片最大字节数，超过直接拒绝
+    max_image_bytes: 5242880
+    # URL 拉图并发上限 (与识别 worker 并行独立控制)
+    max_fetch_concurrency: 16
+    # 是否阻止私网/回环/链路本地 IP，防 SSRF
+    block_private_ip: true
+    # 允许的 URL 协议
+    allowed_schemes: ["http", "https"]
+
 logging:
   # 日志级别: debug, info, warn, error
   level: "info"

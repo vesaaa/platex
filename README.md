@@ -114,7 +114,8 @@ curl -X POST http://localhost:8080/api/v1/recognize \
 {
   "images": [
     {"id": "img_001", "type": "base64", "data": "..."},
-    {"id": "img_002", "type": "path", "data": "/path/to/image.jpg"}
+    {"id": "img_002", "type": "path", "data": "/path/to/image.jpg"},
+    {"id": "img_003", "type": "url", "data": "https://example.com/car.jpg"}
   ],
   "mode": "crop",
   "options": {
@@ -123,6 +124,13 @@ curl -X POST http://localhost:8080/api/v1/recognize \
   }
 }
 ```
+
+`type=url` 需要在配置中启用 `engine.url.enabled`（默认已启用），并受以下参数控制：
+- `engine.url.fetch_timeout_ms`: 下载超时
+- `engine.url.max_image_bytes`: 单图大小上限
+- `engine.url.max_fetch_concurrency`: URL 拉取并发上限（与识别 worker 独立）
+- `engine.url.block_private_ip`: 是否阻止私网/回环地址（防 SSRF）
+- `engine.url.allowed_schemes`: 允许的协议（默认 `http`/`https`）
 
 **`options` 字段说明:**
 

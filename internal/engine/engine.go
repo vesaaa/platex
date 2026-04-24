@@ -7,7 +7,12 @@ import (
 	"image"
 	_ "image/jpeg" // Register JPEG decoder
 	_ "image/png"  // Register PNG decoder
+	"io"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +27,8 @@ type Engine struct {
 	color      *ColorClassifier
 	config     *config.EngineConfig
 	workerCh   chan *recognizeJob
+	urlFetchCh chan struct{}
+	httpClient *http.Client
 	wg         sync.WaitGroup
 
 	// Stats
@@ -72,6 +79,10 @@ func New(cfg *config.EngineConfig) (*Engine, error) {
 		color:      colorCls,
 		config:     cfg,
 		workerCh:   make(chan *recognizeJob, cfg.Workers*2),
+		urlFetchCh: make(chan struct{}, max(1, cfg.URL.MaxFetchConcurrency)),
+		httpClient: &http.Client{
+			Timeout: time.Duration(max(100, cfg.URL.FetchTimeoutMs)) * time.Millisecond,
+		},
 	}
 
 	// Start worker pool
@@ -235,12 +246,129 @@ func (e *Engine) decodeInput(input types.ImageInput) (image.Image, error) {
 		return loadImage(input.Data)
 
 	case "url":
-		// TODO: Implement HTTP fetch for URL type
-		return nil, fmt.Errorf("url type not yet implemented")
+		return e.fetchImageFromURL(input.Data)
 
 	default:
 		return nil, fmt.Errorf("unknown input type: %s", input.Type)
 	}
+}
+
+func (e *Engine) fetchImageFromURL(rawURL string) (image.Image, error) {
+	if !e.config.URL.Enabled {
+		return nil, fmt.Errorf("url input is disabled")
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse url: %w", err)
+	}
+	if !e.isAllowedScheme(parsed.Scheme) {
+		return nil, fmt.Errorf("unsupported url scheme: %s", parsed.Scheme)
+	}
+	if parsed.Hostname() == "" {
+		return nil, fmt.Errorf("url host is empty")
+	}
+
+	if e.config.URL.BlockPrivateIP {
+		if err := ensurePublicHost(parsed.Hostname()); err != nil {
+			return nil, err
+		}
+	}
+
+	e.urlFetchCh <- struct{}{}
+	defer func() { <-e.urlFetchCh }()
+
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("User-Agent", "platex/1.0")
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http fetch: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("http status: %d", resp.StatusCode)
+	}
+
+	if resp.ContentLength > e.config.URL.MaxImageBytes {
+		return nil, fmt.Errorf("image too large: %d > %d", resp.ContentLength, e.config.URL.MaxImageBytes)
+	}
+
+	limited := io.LimitReader(resp.Body, e.config.URL.MaxImageBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
+	if int64(len(data)) > e.config.URL.MaxImageBytes {
+		return nil, fmt.Errorf("image too large: body exceeds %d bytes", e.config.URL.MaxImageBytes)
+	}
+
+	return decodeImage(bytes.NewReader(data))
+}
+
+func (e *Engine) isAllowedScheme(scheme string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(scheme))
+	for _, allowed := range e.config.URL.AllowedSchemes {
+		if normalized == strings.ToLower(strings.TrimSpace(allowed)) {
+			return true
+		}
+	}
+	return false
+}
+
+func ensurePublicHost(host string) error {
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("resolve host: %w", err)
+	}
+	if len(ips) == 0 {
+		return fmt.Errorf("resolve host: no ip found")
+	}
+	for _, ip := range ips {
+		if isPrivateOrLocalIP(ip) {
+			return fmt.Errorf("blocked private/local address: %s", ip.String())
+		}
+	}
+	return nil
+}
+
+func isPrivateOrLocalIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast() {
+		return true
+	}
+	if v4 := ip.To4(); v4 != nil {
+		switch {
+		case v4[0] == 10:
+			return true
+		case v4[0] == 172 && v4[1] >= 16 && v4[1] <= 31:
+			return true
+		case v4[0] == 192 && v4[1] == 168:
+			return true
+		case v4[0] == 169 && v4[1] == 254:
+			return true
+		case v4[0] == 127:
+			return true
+		}
+		return false
+	}
+
+	// IPv6 private and local ranges
+	if len(ip) == net.IPv6len {
+		if ip[0]&0xfe == 0xfc { // fc00::/7 unique local
+			return true
+		}
+		if ip[0] == 0xfe && (ip[1]&0xc0) == 0x80 { // fe80::/10 link local
+			return true
+		}
+		if ip.IsLoopback() {
+			return true
+		}
+	}
+	return false
 }
 
 // GetStats returns current engine statistics.
