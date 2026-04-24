@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -55,7 +57,7 @@ func NewRecognizer(modelPath string, threads, optLevel int) (*Recognizer, error)
 // Returns the plate number string, per-character confidences, and overall confidence.
 func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, error) {
 	// Stage 1: fast path for normal images.
-	plateNumber, charConfs, avgConf, err := r.recognizeSingleAngle(img)
+	plateNumber, charConfs, avgConf, err := r.recognizeSingleAngle(img, false)
 	if err != nil {
 		return "", nil, 0, err
 	}
@@ -82,7 +84,7 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 				if angle != 0 {
 					candImg = rotateImageGrayBG(cimg, angle)
 				}
-				pn, pc, cf, e := r.recognizeSingleAngle(candImg)
+				pn, pc, cf, e := r.recognizeSingleAngle(candImg, true)
 				if e != nil {
 					continue
 				}
@@ -283,7 +285,7 @@ type recognizeCandidateResult struct {
 	score float32
 }
 
-func (r *Recognizer) recognizeSingleAngle(img image.Image) (string, []float32, float32, error) {
+func (r *Recognizer) recognizeSingleAngle(img image.Image, useBeam bool) (string, []float32, float32, error) {
 	// Determine resize strategy
 	useLetterbox := r.shouldUseLetterbox(img)
 	_ = useLetterbox // reserved for future use
@@ -295,8 +297,161 @@ func (r *Recognizer) recognizeSingleAngle(img image.Image) (string, []float32, f
 	}
 
 	plateNumber, charConfs, avgConf := ctcDecode(output, r.timeSteps, r.numClasses)
+	if useBeam {
+		plateNumber, charConfs, avgConf = ctcBeamDecodeWithGrammar(output, r.timeSteps, r.numClasses, 6, 3)
+	}
 	plateNumber, charConfs = normalizePlateNumberWithConfidence(plateNumber, charConfs)
 	return plateNumber, charConfs, avgConf, nil
+}
+
+type ctcBeamState struct {
+	text   []rune
+	confs  []float32
+	lastID int
+	score  float64
+}
+
+func ctcBeamDecodeWithGrammar(output []float32, timeSteps, numClasses, beamWidth, topK int) (string, []float32, float32) {
+	if len(output) == 0 || timeSteps <= 0 || numClasses <= 0 {
+		return "", nil, 0
+	}
+	if beamWidth < 2 {
+		beamWidth = 2
+	}
+	if topK < 2 {
+		topK = 2
+	}
+	beams := []ctcBeamState{{text: []rune{}, confs: []float32{}, lastID: 0, score: 0}}
+	for t := 0; t < timeSteps; t++ {
+		topIDs := topKIndicesAtTimestep(output, t, numClasses, topK)
+		next := make(map[string]ctcBeamState, beamWidth*topK)
+		for _, b := range beams {
+			for _, id := range topIDs {
+				idx := t*numClasses + id
+				if idx >= len(output) {
+					continue
+				}
+				p := float64(output[idx])
+				if p <= 0 {
+					p = 1e-8
+				}
+				nb := ctcBeamState{
+					text:   append([]rune(nil), b.text...),
+					confs:  append([]float32(nil), b.confs...),
+					lastID: id,
+					score:  b.score + math.Log(p),
+				}
+				if id != 0 && id != b.lastID && id < len(plateChars) {
+					token := []rune(plateChars[id])
+					if len(token) == 1 {
+						ch := token[0]
+						nb.text = append(nb.text, ch)
+						nb.confs = append(nb.confs, float32(output[idx]))
+						nb.score += charLegalityBonus(len(nb.text)-1, ch)
+					}
+				}
+				key := string(nb.text) + "|" + strconv.Itoa(nb.lastID)
+				if ex, ok := next[key]; !ok || nb.score > ex.score {
+					next[key] = nb
+				}
+			}
+		}
+		beams = mapToTopBeams(next, beamWidth)
+		if len(beams) == 0 {
+			break
+		}
+	}
+	if len(beams) == 0 {
+		return "", nil, 0
+	}
+	best := beams[0]
+	best.score += finalPatternBonus(best.text)
+	for i := 1; i < len(beams); i++ {
+		s := beams[i]
+		score := s.score + finalPatternBonus(s.text)
+		if score > best.score {
+			best = s
+			best.score = score
+		}
+	}
+	plate := string(best.text)
+	var avg float32
+	if len(best.confs) > 0 {
+		avg = meanConfs(best.confs)
+	}
+	return plate, best.confs, avg
+}
+
+func topKIndicesAtTimestep(output []float32, t, numClasses, k int) []int {
+	type kv struct {
+		id int
+		v  float32
+	}
+	items := make([]kv, 0, numClasses)
+	for c := 0; c < numClasses; c++ {
+		idx := t*numClasses + c
+		if idx >= len(output) {
+			break
+		}
+		items = append(items, kv{id: c, v: output[idx]})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].v > items[j].v })
+	if len(items) > k {
+		items = items[:k]
+	}
+	out := make([]int, 0, len(items))
+	for _, it := range items {
+		out = append(out, it.id)
+	}
+	return out
+}
+
+func mapToTopBeams(m map[string]ctcBeamState, n int) []ctcBeamState {
+	out := make([]ctcBeamState, 0, len(m))
+	for _, v := range m {
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].score > out[j].score })
+	if len(out) > n {
+		out = out[:n]
+	}
+	return out
+}
+
+func charLegalityBonus(pos int, ch rune) float64 {
+	switch pos {
+	case 0:
+		if isChineseRune(ch) {
+			return 0.45
+		}
+		return -1.0
+	case 1:
+		if isASCIILetter(ch) {
+			return 0.35
+		}
+		return -0.8
+	default:
+		if isASCIILetter(ch) || unicode.IsDigit(ch) {
+			return 0.12
+		}
+		return -0.5
+	}
+}
+
+func finalPatternBonus(r []rune) float64 {
+	if len(r) == 0 {
+		return -2
+	}
+	if !looksLikeMainlandPlatePrefix(r) {
+		return -1.5
+	}
+	if len(r) == 7 {
+		return 1.3
+	}
+	if len(r) == 8 {
+		return 1.0
+	}
+	return -0.8
 }
 
 func (r *Recognizer) candidateAngles(img image.Image) []float64 {
