@@ -103,6 +103,16 @@ curl -X POST http://localhost:8080/api/v1/recognize \
   }'
 ```
 
+## 最近更新
+
+### v0.5.7
+
+- 新增 `type=url` 图片输入，支持直接拉取 HTTP/HTTPS 图片进行识别
+- 新增 URL 拉图并发控制：`engine.url.max_fetch_concurrency`（与识别 worker 独立）
+- 新增下载超时与大小限制：`engine.url.fetch_timeout_ms`、`engine.url.max_image_bytes`
+- 新增基础 SSRF 防护：可阻止私网/回环地址（`engine.url.block_private_ip`）
+- 新增协议白名单：`engine.url.allowed_schemes`（默认 `http`、`https`）
+
 ## API 文档
 
 ### POST /api/v1/recognize
