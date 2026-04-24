@@ -40,3 +40,12 @@ func TestRerankAmbiguousPlate_Y6Tail(t *testing.T) {
 	}
 }
 
+func TestUpscaleImage(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 10, 8))
+	up := upscaleImage(src, 2)
+	b := up.Bounds()
+	if b.Dx() != 20 || b.Dy() != 16 {
+		t.Fatalf("unexpected upscaled size %dx%d", b.Dx(), b.Dy())
+	}
+}
+

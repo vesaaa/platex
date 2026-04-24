@@ -72,6 +72,7 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 		score: scorePlateCandidate(plateNumber, avgConf),
 	}
 	crops := r.candidateCrops(img)
+	crops = append(crops, r.candidateCrops(upscaleImage(img, 2))...)
 	angles := r.candidateAngles(img)
 	for _, cimg := range crops {
 		for _, angle := range angles {
@@ -261,25 +262,44 @@ func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (str
 	bestConfs := append([]float32(nil), confs...)
 	bestScore := baseScore
 
-	// Candidate A: repeated-digit tail often comes from Y/6 confusion in tilted crops.
+	// Candidate A: repeated-digit tail often comes from alnum confusion in tilted crops.
 	// Example: 粤L02166 -> 粤L021Y6
 	if unicode.IsDigit(r[4]) && unicode.IsDigit(r[5]) && unicode.IsDigit(r[6]) && r[5] == r[6] {
-		cand := append([]rune(nil), r...)
-		cand[5] = 'Y'
-		candConfs := append([]float32(nil), confs...)
-		if candConfs[5] < 0.70 {
-			candConfs[5] = 0.70
-		}
-		// small penalty for replacement, but allow structural gain to win
-		candScore := scorePlateCandidate(string(cand), meanConfs(candConfs)) - 0.8
-		if candScore > bestScore {
-			bestScore = candScore
-			bestPlate = string(cand)
-			bestConfs = candConfs
+		for _, repl := range ambiguousLettersForDigit(r[5]) {
+			cand := append([]rune(nil), r...)
+			cand[5] = repl
+			candConfs := append([]float32(nil), confs...)
+			if candConfs[5] < 0.68 {
+				candConfs[5] = 0.68
+			}
+			// Replacement penalty keeps this as a recovery-only fallback.
+			candScore := scorePlateCandidate(string(cand), meanConfs(candConfs)) - 1.0
+			if candScore > bestScore {
+				bestScore = candScore
+				bestPlate = string(cand)
+				bestConfs = candConfs
+			}
 		}
 	}
 
 	return bestPlate, bestConfs, bestScore
+}
+
+func ambiguousLettersForDigit(d rune) []rune {
+	switch d {
+	case '0':
+		return []rune{'D', 'Q'}
+	case '1':
+		return []rune{'I', 'L'}
+	case '5':
+		return []rune{'S'}
+	case '6':
+		return []rune{'Y', 'G'}
+	case '8':
+		return []rune{'B'}
+	default:
+		return []rune{'Y'}
+	}
 }
 
 func meanConfs(confs []float32) float32 {
@@ -291,6 +311,26 @@ func meanConfs(confs []float32) float32 {
 		sum += c
 	}
 	return sum / float32(len(confs))
+}
+
+func upscaleImage(src image.Image, scale int) image.Image {
+	if scale <= 1 {
+		return src
+	}
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w == 0 || h == 0 {
+		return src
+	}
+	dst := image.NewNRGBA(image.Rect(0, 0, w*scale, h*scale))
+	for y := 0; y < h*scale; y++ {
+		for x := 0; x < w*scale; x++ {
+			sx := b.Min.X + x/scale
+			sy := b.Min.Y + y/scale
+			dst.Set(x, y, src.At(sx, sy))
+		}
+	}
+	return dst
 }
 
 func mainlandFormatScore(r []rune) float32 {
