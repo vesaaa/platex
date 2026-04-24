@@ -277,13 +277,7 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption) ([]
 		return []types.PlateResult{}, nil
 	}
 
-	maxPlates := e.config.Rec.MaxPlates
-	if opts != nil && opts.MaxPlates > 0 {
-		maxPlates = opts.MaxPlates
-	}
-	if maxPlates <= 0 {
-		maxPlates = 10
-	}
+	maxPlates := resolveMaxPlates(e.config.Rec.MaxPlates, opts)
 	if len(boxes) > maxPlates {
 		boxes = boxes[:maxPlates]
 	}
@@ -438,6 +432,17 @@ func isPrivateOrLocalIP(ip net.IP) bool {
 		}
 	}
 	return false
+}
+
+func resolveMaxPlates(defaultMax int, opts *types.RecognizeOption) int {
+	maxPlates := defaultMax
+	if opts != nil && opts.MaxPlates > 0 {
+		maxPlates = opts.MaxPlates
+	}
+	if maxPlates <= 0 {
+		return 10
+	}
+	return maxPlates
 }
 
 // GetStats returns current engine statistics.
