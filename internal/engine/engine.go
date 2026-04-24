@@ -62,6 +62,7 @@ func New(cfg *config.EngineConfig) (*Engine, error) {
 		cfg.Models.Detector,
 		cfg.ONNX.ThreadsPerSession,
 		cfg.ONNX.OptimizationLevel,
+		cfg.Detection,
 	)
 	if err != nil {
 		slog.Warn("Failed to load detector model", "error", err)

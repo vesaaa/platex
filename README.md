@@ -160,6 +160,17 @@ curl -X POST http://localhost:8080/api/v1/recognize \
 - `engine.url.block_private_ip`: 是否阻止私网/回环地址（防 SSRF）
 - `engine.url.allowed_schemes`: 允许的协议（默认 `http`/`https`）
 
+`mode=full` 的检测后处理参数由配置文件 `engine.detection` 控制：
+- `engine.detection.conf_threshold`: 检测置信度阈值（默认 `0.30`）
+- `engine.detection.iou_threshold`: NMS IoU 阈值（默认 `0.45`）
+- `engine.detection.max_candidates`: NMS 后最多保留候选框数量（默认 `50`）
+
+推荐调参方向：
+- 漏检较多（远距离/小车牌）：适当降低 `conf_threshold`（如 `0.20~0.28`）
+- 重复框较多：适当降低 `iou_threshold`（如 `0.35~0.42`）
+- 邻近车牌互相被吞：适当提高 `iou_threshold`（如 `0.50~0.60`）
+- 推理延迟升高：适当降低 `max_candidates`
+
 **`options` 字段说明:**
 
 | 参数 | 类型 | 默认值 | 说明 |

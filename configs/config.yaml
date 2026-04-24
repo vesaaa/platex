@@ -31,6 +31,14 @@ engine:
     # 全图模式下单图最大车牌数
     max_plates: 10
 
+  detection:
+    # full 模式检测置信度阈值，越低召回越高但误检可能增加
+    conf_threshold: 0.30
+    # NMS IoU 阈值，越低抑制越强，越高保留更多重叠框
+    iou_threshold: 0.45
+    # NMS 后最多保留候选框数量（防止低阈值下候选过多拖慢识别）
+    max_candidates: 50
+
   url:
     # 是否启用 type=url 的网络图片输入
     enabled: true

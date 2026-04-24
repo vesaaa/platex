@@ -27,12 +27,13 @@ type ServerConfig struct {
 
 // EngineConfig holds inference engine settings.
 type EngineConfig struct {
-	Mode    string       `yaml:"mode"`    // "crop" or "full"
-	Workers int          `yaml:"workers"` // 0 = auto
-	Models  ModelsConfig `yaml:"models"`
-	ONNX    ONNXConfig   `yaml:"onnx"`
-	Rec     RecConfig    `yaml:"recognition"`
-	URL     URLConfig    `yaml:"url"`
+	Mode      string          `yaml:"mode"`    // "crop" or "full"
+	Workers   int             `yaml:"workers"` // 0 = auto
+	Models    ModelsConfig    `yaml:"models"`
+	ONNX      ONNXConfig      `yaml:"onnx"`
+	Rec       RecConfig       `yaml:"recognition"`
+	Detection DetectionConfig `yaml:"detection"`
+	URL       URLConfig       `yaml:"url"`
 }
 
 // ModelsConfig holds model file paths.
@@ -52,6 +53,13 @@ type ONNXConfig struct {
 type RecConfig struct {
 	MinConfidence float32 `yaml:"min_confidence"`
 	MaxPlates     int     `yaml:"max_plates"`
+}
+
+// DetectionConfig holds full-mode detector postprocess thresholds.
+type DetectionConfig struct {
+	ConfThreshold float32 `yaml:"conf_threshold"`
+	IoUThreshold  float32 `yaml:"iou_threshold"`
+	MaxCandidates int     `yaml:"max_candidates"`
 }
 
 // URLConfig holds settings for URL image input fetching.
@@ -100,6 +108,11 @@ func DefaultConfig() *Config {
 			Rec: RecConfig{
 				MinConfidence: 0.6,
 				MaxPlates:     10,
+			},
+			Detection: DetectionConfig{
+				ConfThreshold: 0.30,
+				IoUThreshold:  0.45,
+				MaxCandidates: 50,
 			},
 			URL: URLConfig{
 				Enabled:             true,

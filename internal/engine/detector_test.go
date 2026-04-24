@@ -52,7 +52,7 @@ func TestDecodeYOLOLikeOutputAndNMS(t *testing.T) {
 		220, 120, 60, 24, 0.95, 0.9, // distant box B, should be kept
 	}
 
-	boxes := decodeYOLOLikeOutput(output, shape, 0.30, 0.45)
+	boxes := decodeYOLOLikeOutput(output, shape, 0.30, 0.45, 10)
 	if len(boxes) != 2 {
 		t.Fatalf("decodeYOLOLikeOutput() len=%d, want=2", len(boxes))
 	}
@@ -60,6 +60,20 @@ func TestDecodeYOLOLikeOutputAndNMS(t *testing.T) {
 	// Sorted by score desc; first should be the strongest candidate.
 	if boxes[0].score < boxes[1].score {
 		t.Fatalf("boxes not sorted by score desc")
+	}
+}
+
+func TestDecodeYOLOLikeOutputRespectsMaxCandidates(t *testing.T) {
+	shape := []int64{1, 3, 6}
+	output := []float32{
+		100, 100, 30, 10, 0.9, 0.9,
+		200, 100, 30, 10, 0.8, 0.9,
+		300, 100, 30, 10, 0.7, 0.9,
+	}
+
+	boxes := decodeYOLOLikeOutput(output, shape, 0.2, 0.9, 2)
+	if len(boxes) != 2 {
+		t.Fatalf("decodeYOLOLikeOutput() len=%d, want=2", len(boxes))
 	}
 }
 

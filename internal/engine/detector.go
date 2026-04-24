@@ -6,6 +6,8 @@ import (
 	"image/color"
 	"math"
 	"sort"
+
+	"github.com/vesaa/platex/internal/config"
 )
 
 // Detector handles plate region detection from full images.
@@ -13,10 +15,13 @@ type Detector struct {
 	model       *Model
 	inputWidth  int
 	inputHeight int
+	confThr     float32
+	iouThr      float32
+	maxCand     int
 }
 
 // NewDetector creates a detector for full-image plate localization.
-func NewDetector(modelPath string, threads, optLevel int) (*Detector, error) {
+func NewDetector(modelPath string, threads, optLevel int, cfg config.DetectionConfig) (*Detector, error) {
 	if modelPath == "" {
 		return nil, fmt.Errorf("detector model path is empty")
 	}
@@ -28,6 +33,9 @@ func NewDetector(modelPath string, threads, optLevel int) (*Detector, error) {
 		model:       model,
 		inputWidth:  320,
 		inputHeight: 320,
+		confThr:     normalizeConfThreshold(cfg.ConfThreshold),
+		iouThr:      normalizeIoUThreshold(cfg.IoUThreshold),
+		maxCand:     normalizeMaxCandidates(cfg.MaxCandidates),
 	}, nil
 }
 
@@ -53,7 +61,7 @@ func (d *Detector) Detect(img image.Image) ([][4]int, error) {
 		return nil, err
 	}
 
-	boxes := decodeYOLOLikeOutput(out, d.model.GetOutputShape(), 0.30, 0.45)
+	boxes := decodeYOLOLikeOutput(out, d.model.GetOutputShape(), d.confThr, d.iouThr, d.maxCand)
 	if len(boxes) == 0 {
 		return [][4]int{}, nil
 	}
@@ -147,7 +155,7 @@ func imageToTensorDetector(img image.Image) []float32 {
 	return tensor
 }
 
-func decodeYOLOLikeOutput(output []float32, shape []int64, confThr, iouThr float32) []detBox {
+func decodeYOLOLikeOutput(output []float32, shape []int64, confThr, iouThr float32, maxCandidates int) []detBox {
 	if len(output) < 6 {
 		return nil
 	}
@@ -211,7 +219,11 @@ func decodeYOLOLikeOutput(output []float32, shape []int64, confThr, iouThr float
 	sort.Slice(boxes, func(i, j int) bool {
 		return boxes[i].score > boxes[j].score
 	})
-	return nms(boxes, iouThr)
+	boxes = nms(boxes, iouThr)
+	if maxCandidates > 0 && len(boxes) > maxCandidates {
+		boxes = boxes[:maxCandidates]
+	}
+	return boxes
 }
 
 func nms(boxes []detBox, iouThr float32) []detBox {
@@ -266,4 +278,25 @@ func minf(a, b float32) float32 {
 		return a
 	}
 	return b
+}
+
+func normalizeConfThreshold(v float32) float32 {
+	if v <= 0 || v >= 1 {
+		return 0.30
+	}
+	return v
+}
+
+func normalizeIoUThreshold(v float32) float32 {
+	if v <= 0 || v >= 1 {
+		return 0.45
+	}
+	return v
+}
+
+func normalizeMaxCandidates(v int) int {
+	if v <= 0 {
+		return 50
+	}
+	return v
 }
