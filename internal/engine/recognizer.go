@@ -54,48 +54,137 @@ func NewRecognizer(modelPath string, threads, optLevel int) (*Recognizer, error)
 // Recognize performs character recognition on a cropped plate image.
 // Returns the plate number string, per-character confidences, and overall confidence.
 func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, error) {
+	candidates := r.candidateAngles(img)
+	best := recognizeCandidateResult{score: float32(-1e9)}
+
+	for _, angle := range candidates {
+		candImg := img
+		if angle != 0 {
+			candImg = rotateImageGrayBG(img, angle)
+		}
+		plateNumber, charConfs, avgConf, err := r.recognizeSingleAngle(candImg)
+		if err != nil {
+			continue
+		}
+		score := scorePlateCandidate(plateNumber, avgConf)
+		if score > best.score {
+			best = recognizeCandidateResult{
+				plate: plateNumber,
+				confs: charConfs,
+				conf:  avgConf,
+				score: score,
+			}
+		}
+	}
+
+	if best.score <= float32(-1e8) {
+		return "", nil, 0, fmt.Errorf("inference: no valid candidate")
+	}
+
+	slog.Info("Recognition result", "plate", best.plate, "conf", best.conf, "steps", r.timeSteps, "classes", r.numClasses)
+	return best.plate, best.confs, best.conf, nil
+}
+
+type recognizeCandidateResult struct {
+	plate string
+	confs []float32
+	conf  float32
+	score float32
+}
+
+func (r *Recognizer) recognizeSingleAngle(img image.Image) (string, []float32, float32, error) {
 	// Determine resize strategy
 	useLetterbox := r.shouldUseLetterbox(img)
 	_ = useLetterbox // reserved for future use
 
-	// Preprocess: match HyperLPR3's encode_images() exactly
-	// 1. Resize height to 48, width proportionally (capped at 160)
-	// 2. Normalize: (pixel - 127.5) / 127.5 → range [-1, 1]
-	// 3. Channel order: BGR (OpenCV convention)
-	// 4. Left-aligned zero-padding to fill 160 width
 	tensor := r.preprocessPlate(img)
-
-	// DEBUG: Save preprocessed tensor to image to verify preprocessing
-	r.saveDebugImage(tensor, "debug_preprocessed.jpg")
-
-	// Run inference
 	output, err := r.runInference(tensor)
 	if err != nil {
 		return "", nil, 0, fmt.Errorf("inference: %w", err)
 	}
 
-	// DEBUG: Log raw output stats
-	if len(output) > 0 {
-		max := float32(-1e10)
-		min := float32(1e10)
-		for _, v := range output {
-			if v > max {
-				max = v
-			}
-			if v < min {
-				min = v
-			}
-		}
-		slog.Debug("Raw model output stats", "len", len(output), "min", min, "max", max, "first_5", output[:minInt(len(output), 5)])
-	}
-
-	// CTC decode: use detected model output dimensions
 	plateNumber, charConfs, avgConf := ctcDecode(output, r.timeSteps, r.numClasses)
 	plateNumber, charConfs = normalizePlateNumberWithConfidence(plateNumber, charConfs)
-
-	slog.Info("Recognition result", "plate", plateNumber, "conf", avgConf, "steps", r.timeSteps, "classes", r.numClasses)
-
 	return plateNumber, charConfs, avgConf, nil
+}
+
+func (r *Recognizer) candidateAngles(img image.Image) []float64 {
+	b := img.Bounds()
+	w := b.Dx()
+	h := b.Dy()
+	if h == 0 {
+		return []float64{0}
+	}
+	ratio := float64(w) / float64(h)
+	// Square-ish/tilted crops need more angle search.
+	if ratio < 2.2 {
+		return []float64{0, -12, 12, -8, 8, -4, 4}
+	}
+	return []float64{0, -8, 8}
+}
+
+func scorePlateCandidate(plate string, conf float32) float32 {
+	r := []rune(strings.TrimSpace(plate))
+	if len(r) == 0 {
+		return -100
+	}
+	score := conf * 100
+
+	// Prefer standard CN plate lengths.
+	switch len(r) {
+	case 7:
+		score += 8
+	case 8:
+		score += 10
+	case 6:
+		score -= 12
+	default:
+		score -= 20
+	}
+	if looksLikeMainlandPlatePrefix(r) {
+		score += 6
+	} else {
+		score -= 10
+	}
+	return score
+}
+
+func rotateImageGrayBG(src image.Image, angleDeg float64) image.Image {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w == 0 || h == 0 {
+		return src
+	}
+	dst := image.NewNRGBA(image.Rect(0, 0, w, h))
+	bg := color.NRGBA{R: 128, G: 128, B: 128, A: 255}
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			dst.SetNRGBA(x, y, bg)
+		}
+	}
+
+	rad := angleDeg * math.Pi / 180.0
+	sinA := math.Sin(rad)
+	cosA := math.Cos(rad)
+	cx := float64(w-1) / 2.0
+	cy := float64(h-1) / 2.0
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			dx := float64(x) - cx
+			dy := float64(y) - cy
+
+			srcX := cosA*dx + sinA*dy + cx
+			srcY := -sinA*dx + cosA*dy + cy
+
+			ix := int(math.Round(srcX))
+			iy := int(math.Round(srcY))
+			if ix >= 0 && ix < w && iy >= 0 && iy < h {
+				dst.Set(x, y, src.At(ix+b.Min.X, iy+b.Min.Y))
+			}
+		}
+	}
+	return dst
 }
 
 func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []float32) {
