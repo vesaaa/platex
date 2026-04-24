@@ -10,8 +10,9 @@ import (
 
 // Model wraps an ONNX Runtime inference session.
 type Model struct {
-	name     string
-	filePath string
+	name        string
+	filePath    string
+	outputShape []int64
 }
 
 // loadModel loads an ONNX model file (Mock for Windows)

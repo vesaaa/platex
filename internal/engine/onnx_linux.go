@@ -17,6 +17,7 @@ type Model struct {
 	name         string
 	inputTensor  *ort.Tensor[float32]
 	outputTensor *ort.Tensor[float32]
+	outputShape  []int64
 }
 
 // initONNXRuntime initializes the ONNX Runtime shared library.
@@ -117,6 +118,7 @@ func loadModel(modelPath string, threads int, optLevel int) (*Model, error) {
 		name:         name,
 		inputTensor:  inTensor,
 		outputTensor: outTensor,
+		outputShape:  outShape,
 	}, nil
 }
 
@@ -149,10 +151,7 @@ func (m *Model) RunInference(inputData []float32) ([]float32, error) {
 
 // GetOutputShape returns the dimensions of the model's output tensor.
 func (m *Model) GetOutputShape() []int64 {
-	if m.outputTensor == nil {
-		return nil
-	}
-	return m.outputTensor.GetShape().GetDimensions()
+	return m.outputShape
 }
 
 // Close releases the model resources.
