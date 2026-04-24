@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"unicode"
 
 	"github.com/vesaa/platex/internal/types"
 )
@@ -90,10 +91,77 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 
 	// CTC decode: use detected model output dimensions
 	plateNumber, charConfs, avgConf := ctcDecode(output, r.timeSteps, r.numClasses)
+	plateNumber, charConfs = normalizePlateNumberWithConfidence(plateNumber, charConfs)
 
 	slog.Info("Recognition result", "plate", plateNumber, "conf", avgConf, "steps", r.timeSteps, "classes", r.numClasses)
 
 	return plateNumber, charConfs, avgConf, nil
+}
+
+func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []float32) {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) < 2 || len(confs) != len(r) {
+		return s, confs
+	}
+
+	// Soft correction 1:
+	// Collapse duplicated province prefix only when the duplicate has low confidence.
+	if len(r) >= 3 &&
+		r[0] == r[1] &&
+		isChineseRune(r[0]) &&
+		isASCIILetter(r[2]) &&
+		confs[1] < 0.72 {
+		r = append([]rune{r[0]}, r[2:]...)
+		confs = append([]float32{confs[0]}, confs[2:]...)
+	}
+
+	// Soft correction 2:
+	// For new-energy-like tail, convert '0' -> 'D' only on low confidence.
+	// Example: 粤LD07111 -> 粤LDD7111
+	if len(r) >= 8 {
+		for i := 2; i <= len(r)-4; i++ {
+			if r[i] != '0' || confs[i] >= 0.72 {
+				continue
+			}
+			if i > 0 && isASCIILetter(r[i-1]) && allDigits(r[i+1:]) {
+				r[i] = 'D'
+				confs[i] = 0.72
+				break
+			}
+		}
+	}
+
+	// Soft correction 3:
+	// If result length is 6 after low-confidence duplicate cleanup, and last char is a
+	// confident digit, duplicate tail once to recover common CTC merge drop.
+	if len(r) == 6 &&
+		unicode.IsDigit(r[len(r)-1]) &&
+		confs[len(confs)-1] >= 0.86 {
+		r = append(r, r[len(r)-1])
+		confs = append(confs, confs[len(confs)-1]*0.95)
+	}
+
+	return string(r), confs
+}
+
+func isChineseRune(ch rune) bool {
+	return unicode.Is(unicode.Han, ch)
+}
+
+func isASCIILetter(ch rune) bool {
+	return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+}
+
+func allDigits(rs []rune) bool {
+	if len(rs) == 0 {
+		return false
+	}
+	for _, ch := range rs {
+		if !unicode.IsDigit(ch) {
+			return false
+		}
+	}
+	return true
 }
 
 // runInference executes the ONNX model.
