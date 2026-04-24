@@ -26,8 +26,14 @@ func TestNeedRecoverySearch(t *testing.T) {
 	if !needRecoverySearch("浙B9", 0.63) {
 		t.Fatalf("expected short malformed plate to require recovery")
 	}
-	if needRecoverySearch("粤B590MF", 0.92) {
-		t.Fatalf("expected high-quality normal plate to skip recovery")
+	if needRecoverySearch("粤B590MF", 0.52) {
+		t.Fatalf("expected valid 7-char normal plate to skip recovery even at low conf")
+	}
+	if needRecoverySearch("粤BD12345", 0.58) {
+		t.Fatalf("expected valid 8-char normal plate to skip recovery even at low conf")
+	}
+	if !needRecoverySearch("粤B590M", 0.40) {
+		t.Fatalf("expected irregular length low-conf plate to require recovery")
 	}
 }
 

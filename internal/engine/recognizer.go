@@ -124,7 +124,13 @@ func needRecoverySearch(plate string, conf float32) bool {
 	if !looksLikeMainlandPlatePrefix(r) {
 		return true
 	}
-	return conf < 0.70
+	// For standard-looking 7/8 char outputs, keep fast-path result to avoid
+	// over-correction on otherwise clear images.
+	if len(r) == 7 || len(r) == 8 {
+		return false
+	}
+	// Fallback: only low-confidence irregular lengths enter recovery.
+	return conf < 0.65
 }
 
 func (r *Recognizer) recoveryVariants(img image.Image) []image.Image {
