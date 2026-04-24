@@ -120,7 +120,7 @@ func (s *Server) handleRecognize(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	// Process images
-	results := s.engine.RecognizeBatch(req.Images, req.Options)
+	results := s.engine.RecognizeBatch(req.Images, mode, req.Options)
 
 	writeJSON(w, http.StatusOK, types.RecognizeResponse{
 		Code:    0,

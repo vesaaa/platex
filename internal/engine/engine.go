@@ -23,6 +23,7 @@ import (
 
 // Engine is the main license plate recognition engine.
 type Engine struct {
+	detector   *Detector
 	recognizer *Recognizer
 	color      *ColorClassifier
 	config     *config.EngineConfig
@@ -56,6 +57,17 @@ func New(cfg *config.EngineConfig) (*Engine, error) {
 		slog.Warn("Failed to initialize ONNX Runtime, will use fallback", "error", err)
 	}
 
+	// Load detector model (for full mode)
+	detector, err := NewDetector(
+		cfg.Models.Detector,
+		cfg.ONNX.ThreadsPerSession,
+		cfg.ONNX.OptimizationLevel,
+	)
+	if err != nil {
+		slog.Warn("Failed to load detector model", "error", err)
+		// Continue without detector - full mode will fail on requests
+	}
+
 	// Load recognizer model
 	recognizer, err := NewRecognizer(
 		cfg.Models.Recognizer,
@@ -75,6 +87,7 @@ func New(cfg *config.EngineConfig) (*Engine, error) {
 	)
 
 	e := &Engine{
+		detector:   detector,
 		recognizer: recognizer,
 		color:      colorCls,
 		config:     cfg,
@@ -151,7 +164,7 @@ func (e *Engine) recognizeSingle(img image.Image) (*types.PlateResult, error) {
 }
 
 // RecognizeBatch processes a batch of image inputs.
-func (e *Engine) RecognizeBatch(inputs []types.ImageInput, opts *types.RecognizeOption) []types.ImageResult {
+func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *types.RecognizeOption) []types.ImageResult {
 	start := time.Now()
 	results := make([]types.ImageResult, len(inputs))
 
@@ -160,6 +173,11 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, opts *types.Recognize
 		minConf = opts.MinConfidence
 	}
 	_ = minConf // Will be used when model is integrated
+
+	// Normalize mode
+	if mode == "" {
+		mode = "crop"
+	}
 
 	// Set resize mode: default to auto
 	if e.recognizer != nil {
@@ -189,7 +207,22 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, opts *types.Recognize
 				return
 			}
 
-			// Submit to worker pool
+			if mode == "full" {
+				plates, recErr := e.recognizeFull(img, opts)
+				if recErr != nil {
+					result.Error = recErr.Error()
+				} else {
+					result.Plates = plates
+					e.totalPlates.Add(int64(len(plates)))
+				}
+				result.ElapsedMs = time.Since(imgStart).Milliseconds()
+				e.totalImages.Add(1)
+				e.totalTimeMs.Add(result.ElapsedMs)
+				results[idx] = result
+				return
+			}
+
+			// Submit to worker pool (crop mode)
 			job := &recognizeJob{
 				img:      img,
 				resultCh: make(chan *types.PlateResult, 1),
@@ -230,6 +263,42 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, opts *types.Recognize
 	)
 
 	return results
+}
+
+func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption) ([]types.PlateResult, error) {
+	if e.detector == nil {
+		return nil, fmt.Errorf("detector model not loaded")
+	}
+	boxes, err := e.detector.Detect(img)
+	if err != nil {
+		return nil, fmt.Errorf("detect: %w", err)
+	}
+	if len(boxes) == 0 {
+		return []types.PlateResult{}, nil
+	}
+
+	maxPlates := e.config.Rec.MaxPlates
+	if opts != nil && opts.MaxPlates > 0 {
+		maxPlates = opts.MaxPlates
+	}
+	if maxPlates <= 0 {
+		maxPlates = 10
+	}
+	if len(boxes) > maxPlates {
+		boxes = boxes[:maxPlates]
+	}
+
+	results := make([]types.PlateResult, 0, len(boxes))
+	for _, b := range boxes {
+		crop := cropImage(img, b[0], b[1], b[2], b[3])
+		plate, recErr := e.recognizeSingle(crop)
+		if recErr != nil || plate == nil {
+			continue
+		}
+		plate.BBox = b
+		results = append(results, *plate)
+	}
+	return results, nil
 }
 
 // decodeInput converts an ImageInput to a Go image.Image.
@@ -397,6 +466,9 @@ func (e *Engine) Close() {
 
 	if e.recognizer != nil {
 		e.recognizer.Close()
+	}
+	if e.detector != nil {
+		e.detector.Close()
 	}
 	if e.color != nil {
 		e.color.Close()

@@ -101,6 +101,24 @@ curl -X POST http://localhost:8080/api/v1/recognize \
       "resize_mode": "letterbox"
     }
   }'
+
+# 全图检测+识别 (full 模式, 自动检测车牌框后识别)
+curl -X POST http://localhost:8080/api/v1/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "images": [
+      {
+        "id": "scene_001",
+        "type": "url",
+        "data": "https://example.com/parking_lot.jpg"
+      }
+    ],
+    "mode": "full",
+    "options": {
+      "max_plates": 5,
+      "min_confidence": 0.6
+    }
+  }'
 ```
 
 ## 最近更新
