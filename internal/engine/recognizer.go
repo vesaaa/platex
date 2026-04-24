@@ -330,6 +330,23 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 		confs = append(confs, confs[len(confs)-1]*0.95)
 	}
 
+	// Soft correction 4:
+	// For 7-char mainland plates, when the last two chars are repeated digits and the
+	// penultimate char confidence is relatively low, prefer letter-digit ending (Y6-like).
+	// Example: 粤L02166 -> 粤L021Y6
+	if len(r) == 7 &&
+		looksLikeMainlandPlatePrefix(r) &&
+		unicode.IsDigit(r[5]) &&
+		unicode.IsDigit(r[6]) &&
+		r[5] == r[6] &&
+		confs[5] < 0.88 &&
+		confs[6] >= 0.80 {
+		r[5] = 'Y'
+		if confs[5] < 0.72 {
+			confs[5] = 0.72
+		}
+	}
+
 	return string(r), confs
 }
 
