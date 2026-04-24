@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -96,6 +97,11 @@ func New(cfg *config.EngineConfig) (*Engine, error) {
 		urlFetchCh: make(chan struct{}, max(1, cfg.URL.MaxFetchConcurrency)),
 		httpClient: &http.Client{
 			Timeout: time.Duration(max(100, cfg.URL.FetchTimeoutMs)) * time.Millisecond,
+			Transport: &http.Transport{
+				MaxIdleConns:        max(32, cfg.URL.MaxIdleConns),
+				MaxIdleConnsPerHost: max(8, cfg.URL.MaxIdleConnsPerHost),
+				IdleConnTimeout:     90 * time.Second,
+			},
 		},
 	}
 
@@ -244,6 +250,9 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 				errCh:    make(chan error, 1),
 			}
 
+			submitTimeout := time.Duration(max(50, e.config.SubmitTimeoutMs)) * time.Millisecond
+			timer := time.NewTimer(submitTimeout)
+			defer timer.Stop()
 			select {
 			case e.workerCh <- job:
 				// Wait for result
@@ -258,8 +267,8 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 				case err := <-job.errCh:
 					result.Error = err.Error()
 				}
-			default:
-				result.Error = "worker pool full, try again later"
+			case <-timer.C:
+				result.Error = "worker queue submit timeout, try again later"
 			}
 
 			result.ElapsedMs = time.Since(imgStart).Milliseconds()
@@ -361,6 +370,26 @@ func (e *Engine) fetchImageFromURL(rawURL string) (image.Image, error) {
 	}
 	req.Header.Set("User-Agent", "platex/1.0")
 
+	retries := max(0, e.config.URL.MaxFetchRetries)
+	backoff := time.Duration(max(20, e.config.URL.RetryBackoffMs)) * time.Millisecond
+	var lastErr error
+	for attempt := 0; attempt <= retries; attempt++ {
+		img, fetchErr := e.fetchImageFromURLOnce(req)
+		if fetchErr == nil {
+			return img, nil
+		}
+		lastErr = fetchErr
+		if !shouldRetryStatusError(lastErr) {
+			return nil, lastErr
+		}
+		if attempt < retries {
+			time.Sleep(backoff * time.Duration(attempt+1))
+		}
+	}
+	return nil, lastErr
+}
+
+func (e *Engine) fetchImageFromURLOnce(req *http.Request) (image.Image, error) {
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http fetch: %w", err)
@@ -370,7 +399,6 @@ func (e *Engine) fetchImageFromURL(rawURL string) (image.Image, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("http status: %d", resp.StatusCode)
 	}
-
 	if resp.ContentLength > e.config.URL.MaxImageBytes {
 		return nil, fmt.Errorf("image too large: %d > %d", resp.ContentLength, e.config.URL.MaxImageBytes)
 	}
@@ -383,8 +411,11 @@ func (e *Engine) fetchImageFromURL(rawURL string) (image.Image, error) {
 	if int64(len(data)) > e.config.URL.MaxImageBytes {
 		return nil, fmt.Errorf("image too large: body exceeds %d bytes", e.config.URL.MaxImageBytes)
 	}
-
-	return decodeImage(bytes.NewReader(data))
+	img, err := decodeImage(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
 }
 
 func (e *Engine) isAllowedScheme(scheme string) bool {
@@ -457,6 +488,25 @@ func resolveMaxPlates(defaultMax int, opts *types.RecognizeOption) int {
 		return 10
 	}
 	return maxPlates
+}
+
+func shouldRetryStatusError(err error) bool {
+	msg := err.Error()
+	if strings.Contains(msg, "http fetch:") {
+		return true
+	}
+	if !strings.HasPrefix(msg, "http status: ") {
+		return false
+	}
+	codeStr := strings.TrimPrefix(msg, "http status: ")
+	code, convErr := strconv.Atoi(strings.TrimSpace(codeStr))
+	if convErr != nil {
+		return false
+	}
+	if code == http.StatusTooManyRequests {
+		return true
+	}
+	return code >= 500 && code <= 599
 }
 
 // GetStats returns current engine statistics.

@@ -13,6 +13,8 @@ engine:
   mode: "crop"
   # Worker数量, 0 = 自动 (CPU核心数 * 0.75)
   workers: 0
+  # 投递到识别 worker 队列的等待超时 (毫秒), 避免瞬时拥塞直接丢图
+  submit_timeout_ms: 300
 
   models:
     recognizer: "models/plate_rec.onnx"
@@ -48,6 +50,14 @@ engine:
     max_image_bytes: 5242880
     # URL 拉图并发上限 (与识别 worker 并行独立控制)
     max_fetch_concurrency: 16
+    # 下载失败最大重试次数 (总尝试次数 = 1 + max_fetch_retries)
+    max_fetch_retries: 2
+    # 下载重试基础退避时间 (毫秒), 会按尝试次数线性递增
+    retry_backoff_ms: 120
+    # HTTP连接池总空闲连接数上限
+    max_idle_conns: 256
+    # 单Host空闲连接数上限
+    max_idle_conns_per_host: 64
     # 是否阻止私网/回环/链路本地 IP，防 SSRF
     block_private_ip: true
     # 允许的 URL 协议

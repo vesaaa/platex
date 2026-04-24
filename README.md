@@ -157,8 +157,14 @@ curl -X POST http://localhost:8080/api/v1/recognize \
 - `engine.url.fetch_timeout_ms`: 下载超时
 - `engine.url.max_image_bytes`: 单图大小上限
 - `engine.url.max_fetch_concurrency`: URL 拉取并发上限（与识别 worker 独立）
+- `engine.url.max_fetch_retries`: 下载失败最大重试次数（建议 `1~3`）
+- `engine.url.retry_backoff_ms`: 重试基础退避时间，实际退避会按尝试次数递增
+- `engine.url.max_idle_conns` / `engine.url.max_idle_conns_per_host`: HTTP 连接池参数，批量 URL 请求建议适当调高
 - `engine.url.block_private_ip`: 是否阻止私网/回环地址（防 SSRF）
 - `engine.url.allowed_schemes`: 允许的协议（默认 `http`/`https`）
+
+批量请求建议同时配置 `engine.submit_timeout_ms`（默认 `300ms`）：  
+当 worker 繁忙时，任务会短时阻塞等待队列而不是立即失败，超时后返回 busy 错误，兼顾吞吐与成功率。
 
 `mode=full` 的检测后处理参数由配置文件 `engine.detection` 控制：
 - `engine.detection.conf_threshold`: 检测置信度阈值（默认 `0.30`）

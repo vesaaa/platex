@@ -29,6 +29,7 @@ type ServerConfig struct {
 type EngineConfig struct {
 	Mode      string          `yaml:"mode"`    // "crop" or "full"
 	Workers   int             `yaml:"workers"` // 0 = auto
+	SubmitTimeoutMs int       `yaml:"submit_timeout_ms"`
 	Models    ModelsConfig    `yaml:"models"`
 	ONNX      ONNXConfig      `yaml:"onnx"`
 	Rec       RecConfig       `yaml:"recognition"`
@@ -68,6 +69,10 @@ type URLConfig struct {
 	FetchTimeoutMs      int    `yaml:"fetch_timeout_ms"`
 	MaxImageBytes       int64  `yaml:"max_image_bytes"`
 	MaxFetchConcurrency int    `yaml:"max_fetch_concurrency"`
+	MaxFetchRetries     int    `yaml:"max_fetch_retries"`
+	RetryBackoffMs      int    `yaml:"retry_backoff_ms"`
+	MaxIdleConns        int    `yaml:"max_idle_conns"`
+	MaxIdleConnsPerHost int    `yaml:"max_idle_conns_per_host"`
 	BlockPrivateIP      bool   `yaml:"block_private_ip"`
 	AllowedSchemes      []string `yaml:"allowed_schemes"`
 }
@@ -96,6 +101,7 @@ func DefaultConfig() *Config {
 		Engine: EngineConfig{
 			Mode:    "crop",
 			Workers: workers,
+			SubmitTimeoutMs: 300,
 			Models: ModelsConfig{
 				Recognizer: "models/plate_rec.onnx",
 				Detector:   "models/plate_detect.onnx",
@@ -119,6 +125,10 @@ func DefaultConfig() *Config {
 				FetchTimeoutMs:      1200,
 				MaxImageBytes:       5 * 1024 * 1024,
 				MaxFetchConcurrency: 16,
+				MaxFetchRetries:     2,
+				RetryBackoffMs:      120,
+				MaxIdleConns:        256,
+				MaxIdleConnsPerHost: 64,
 				BlockPrivateIP:      true,
 				AllowedSchemes:      []string{"http", "https"},
 			},
