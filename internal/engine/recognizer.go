@@ -132,11 +132,13 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 	}
 
 	// Soft correction 3:
-	// If result length is 6 after low-confidence duplicate cleanup, and last char is a
-	// confident digit, duplicate tail once to recover common CTC merge drop.
+	// If result length is 6 and it looks like a normal mainland plate prefix,
+	// duplicate tail digit once to recover common CTC merge drop at the end.
+	// Example: 粤LE7G2 -> 粤LE7G22
 	if len(r) == 6 &&
+		looksLikeMainlandPlatePrefix(r) &&
 		unicode.IsDigit(r[len(r)-1]) &&
-		confs[len(confs)-1] >= 0.86 {
+		confs[len(confs)-1] >= 0.65 {
 		r = append(r, r[len(r)-1])
 		confs = append(confs, confs[len(confs)-1]*0.95)
 	}
@@ -162,6 +164,14 @@ func allDigits(rs []rune) bool {
 		}
 	}
 	return true
+}
+
+func looksLikeMainlandPlatePrefix(r []rune) bool {
+	if len(r) < 2 {
+		return false
+	}
+	// Typical structure starts with province Chinese char + Latin letter.
+	return isChineseRune(r[0]) && isASCIILetter(r[1])
 }
 
 // runInference executes the ONNX model.

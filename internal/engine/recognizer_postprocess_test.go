@@ -31,3 +31,13 @@ func TestNormalizePlateNumberWithConfidence_NoChangeWhenConfident(t *testing.T) 
 	}
 }
 
+func TestNormalizePlateNumberWithConfidence_AppendLastDigitForLen6(t *testing.T) {
+	in := "粤LE7G2"
+	want := "粤LE7G22"
+	confs := []float32{0.95, 0.92, 0.89, 0.87, 0.86, 0.70}
+	got, _ := normalizePlateNumberWithConfidence(in, confs)
+	if got != want {
+		t.Fatalf("normalizePlateNumberWithConfidence(%q)=%q, want=%q", in, got, want)
+	}
+}
+
