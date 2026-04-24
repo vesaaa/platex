@@ -368,7 +368,11 @@ func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (str
 
 	// Candidate B: adjacent transposition in tail is common on tilted/noisy crops.
 	// Example: 粤L02Y16 -> 粤L021Y6
-	if isASCIILetter(r[4]) && unicode.IsDigit(r[5]) && unicode.IsDigit(r[6]) {
+	if isASCIILetter(r[4]) &&
+		unicode.IsDigit(r[5]) &&
+		unicode.IsDigit(r[6]) &&
+		r[5] != r[6] &&
+		confs[4] < 0.90 {
 		cand := append([]rune(nil), r...)
 		cand[4], cand[5] = cand[5], cand[4]
 		candConfs := append([]float32(nil), confs...)

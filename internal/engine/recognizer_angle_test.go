@@ -49,6 +49,15 @@ func TestRerankAmbiguousPlate_TailTransposition(t *testing.T) {
 	}
 }
 
+func TestRerankAmbiguousPlate_NoTranspositionForRepeatedTailDigits(t *testing.T) {
+	in := "粤LE7G22"
+	confs := []float32{0.97, 0.95, 0.93, 0.92, 0.91, 0.90, 0.90}
+	out, _, _ := rerankAmbiguousPlate(in, confs, 0)
+	if out != in {
+		t.Fatalf("expected unchanged output %s, got %s", in, out)
+	}
+}
+
 func TestUpscaleImage(t *testing.T) {
 	src := image.NewNRGBA(image.Rect(0, 0, 10, 8))
 	up := upscaleImage(src, 2)
