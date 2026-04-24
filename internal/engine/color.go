@@ -40,7 +40,9 @@ func NewColorClassifier(modelPath string, threads, optLevel int) *ColorClassifie
 // Returns color code (0-5) and confidence.
 func (c *ColorClassifier) Classify(img image.Image) (int, float32) {
 	if !c.useModel {
-		return getDominantColor(img), 0.5 // Heuristic with low confidence
+		color, conf := getDominantColorWithConf(img)
+		slog.Debug("Color classified by heuristic fallback", "color", color, "conf", conf)
+		return color, conf
 	}
 
 	// Preprocess
@@ -52,11 +54,26 @@ func (c *ColorClassifier) Classify(img image.Image) (int, float32) {
 	output, err := c.runInference(tensor)
 	if err != nil {
 		slog.Warn("Color inference failed, using heuristic", "error", err)
-		return getDominantColor(img), 0.5
+		color, conf := getDominantColorWithConf(img)
+		return color, conf
 	}
 
 	// Find max class
 	return argmaxWithConf(output)
+}
+
+func getDominantColorWithConf(img image.Image) (int, float32) {
+	color := getDominantColor(img)
+	// Heuristic fallback confidence should stay conservative.
+	// Green is usually harder under warm/low-light conditions.
+	switch color {
+	case 5: // green
+		return color, 0.62
+	case 4: // yellow
+		return color, 0.58
+	default:
+		return color, 0.55
+	}
 }
 
 // runInference executes the color classification model.

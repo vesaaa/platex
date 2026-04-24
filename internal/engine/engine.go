@@ -133,7 +133,7 @@ func (e *Engine) recognizeSingle(img image.Image) (*types.PlateResult, error) {
 	}
 
 	// Step 1: Character recognition
-	plateNumber, charConfs, confidence, err := e.recognizer.Recognize(img)
+	plateNumber, _, confidence, err := e.recognizer.Recognize(img)
 	if err != nil {
 		return nil, fmt.Errorf("recognition: %w", err)
 	}
@@ -144,10 +144,25 @@ func (e *Engine) recognizeSingle(img image.Image) (*types.PlateResult, error) {
 	}
 
 	// Step 2: Color classification
-	colorCode, _ := e.color.Classify(img)
+	colorCode, colorConf := e.color.Classify(img)
 
 	// Step 3: Determine plate type
 	plateType := classifyPlateType(plateNumber)
+
+	// Lightweight consistency correction:
+	// new-energy plates are predominantly green; if color confidence is low,
+	// avoid reporting yellow by biasing toward green.
+	if plateType == types.PlateTypeNewEnergy &&
+		colorCode == int(types.ColorYellow) &&
+		colorConf < 0.80 {
+		slog.Info("Color corrected for new-energy plate",
+			"plate", plateNumber,
+			"from", colorCode,
+			"to", int(types.ColorGreen),
+			"color_conf", colorConf,
+		)
+		colorCode = int(types.ColorGreen)
+	}
 
 	colorName := "其他"
 	if name, ok := types.ColorNames[types.PlateColor(colorCode)]; ok {
@@ -155,12 +170,11 @@ func (e *Engine) recognizeSingle(img image.Image) (*types.PlateResult, error) {
 	}
 
 	return &types.PlateResult{
-		PlateNumber:     plateNumber,
-		Color:           types.PlateColor(colorCode),
-		ColorName:       colorName,
-		Confidence:      confidence,
-		CharConfidences: charConfs,
-		Type:            plateType,
+		PlateNumber: plateNumber,
+		Color:       types.PlateColor(colorCode),
+		ColorName:   colorName,
+		Confidence:  confidence,
+		Type:        plateType,
 	}, nil
 }
 
@@ -290,7 +304,6 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption) ([]
 		if recErr != nil || plate == nil {
 			continue
 		}
-		plate.BBox = b
 		results = append(results, *plate)
 	}
 	return results, nil

@@ -48,13 +48,11 @@ const (
 
 // PlateResult represents a single recognized license plate.
 type PlateResult struct {
-	PlateNumber     string     `json:"plate_number"`
-	Color           PlateColor `json:"color"`
-	ColorName       string     `json:"color_name"`
-	Confidence      float32    `json:"confidence"`
-	CharConfidences []float32  `json:"char_confidences,omitempty"`
-	Type            PlateType  `json:"type"`
-	BBox            [4]int     `json:"bbox,omitempty"` // x1, y1, x2, y2 (full image mode only)
+	PlateNumber string     `json:"plate_number"`
+	Color       PlateColor `json:"color"`
+	ColorName   string     `json:"color_name"`
+	Confidence  float32    `json:"confidence"`
+	Type        PlateType  `json:"type"`
 }
 
 // ImageResult represents the recognition result for a single image.

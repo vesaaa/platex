@@ -164,9 +164,10 @@ func getDominantColor(img image.Image) int {
 		return 1 // White
 	case h >= 100 && h <= 140 && s > 50:
 		return 3 // Blue
-	case (h >= 40 && h <= 70) && s > 50:
+	// Narrow yellow range to reduce green-new-energy misclassification.
+	case (h >= 40 && h < 66) && s > 55:
 		return 4 // Yellow
-	case (h >= 70 && h <= 170) && s > 30:
+	case (h >= 66 && h <= 170) && s > 28:
 		return 5 // Green
 	default:
 		return 0 // Other
