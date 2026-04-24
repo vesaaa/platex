@@ -81,6 +81,8 @@ func loadModel(modelPath string, threads int, optLevel int) (*Model, error) {
 	if inShape[0] == -1 {
 		inShape[0] = 1
 	}
+	slog.Info("Model input info", "name", inputs[0].Name, "shape", inShape)
+
 	inTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(inShape...))
 	if err != nil {
 		return nil, fmt.Errorf("create input tensor: %w", err)
@@ -90,6 +92,7 @@ func loadModel(modelPath string, threads int, optLevel int) (*Model, error) {
 	if outShape[0] == -1 {
 		outShape[0] = 1
 	}
+	slog.Info("Model output info", "name", outputs[0].Name, "shape", outShape)
 	outTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(outShape...))
 	if err != nil {
 		inTensor.Destroy()

@@ -3,7 +3,11 @@ package engine
 import (
 	"fmt"
 	"image"
+	"image/color"
+	"image/jpeg"
+	"log/slog"
 	"math"
+	"os"
 	"strings"
 
 	"github.com/vesaa/platex/internal/types"
@@ -46,15 +50,35 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 	// 4. Left-aligned zero-padding to fill 160 width
 	tensor := r.preprocessPlate(img)
 
+	// DEBUG: Save preprocessed tensor to image to verify preprocessing
+	r.saveDebugImage(tensor, "debug_preprocessed.jpg")
+
 	// Run inference
 	output, err := r.runInference(tensor)
 	if err != nil {
 		return "", nil, 0, fmt.Errorf("inference: %w", err)
 	}
 
+	// DEBUG: Log raw output stats
+	if len(output) > 0 {
+		max := float32(-1e10)
+		min := float32(1e10)
+		for _, v := range output {
+			if v > max {
+				max = v
+			}
+			if v < min {
+				min = v
+			}
+		}
+		slog.Debug("Raw model output stats", "len", len(output), "min", min, "max", max, "first_5", output[:minInt(len(output), 5)])
+	}
+
 	// CTC decode: model outputs [40, 6625] but only first 77 indices are valid chars
 	numClasses := len(output) / r.getOutputTimeSteps() // = 6625
 	plateNumber, charConfs, avgConf := ctcDecode(output, r.getOutputTimeSteps(), numClasses)
+
+	slog.Debug("Recognition result", "plate", plateNumber, "conf", avgConf, "steps", r.getOutputTimeSteps(), "classes", numClasses)
 
 	return plateNumber, charConfs, avgConf, nil
 }
@@ -103,6 +127,9 @@ func ctcDecode(output []float32, timeSteps, numClasses int) (string, []float32, 
 			if maxIdx < len(plateChars) {
 				chars = append(chars, plateChars[maxIdx])
 				confs = append(confs, conf)
+				slog.Debug("CTC token", "t", t, "idx", maxIdx, "char", plateChars[maxIdx], "conf", conf)
+			} else {
+				slog.Debug("CTC token ignored (index out of range)", "t", t, "idx", maxIdx, "conf", conf)
 			}
 		}
 		prevIdx = maxIdx
@@ -208,3 +235,32 @@ func (r *Recognizer) Close() {
 		r.model.Close()
 	}
 }
+
+func (r *Recognizer) saveDebugImage(tensor []float32, filename string) {
+	img := image.NewNRGBA(image.Rect(0, 0, r.inputWidth, r.inputHeight))
+	channelSize := r.inputWidth * r.inputHeight
+	for y := 0; y < r.inputHeight; y++ {
+		for x := 0; x < r.inputWidth; x++ {
+			idx := y*r.inputWidth + x
+			// Tensor is BGR, convert back to RGB for saving
+			b := uint8(tensor[0*channelSize+idx]*127.5 + 127.5)
+			g := uint8(tensor[1*channelSize+idx]*127.5 + 127.5)
+			re := uint8(tensor[2*channelSize+idx]*127.5 + 127.5)
+			img.SetNRGBA(x, y, color.NRGBA{R: re, G: g, B: b, A: 255})
+		}
+	}
+	f, err := os.Create(filename)
+	if err == nil {
+		jpeg.Encode(f, img, nil)
+		f.Close()
+		slog.Debug("Saved debug image", "path", filename)
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
