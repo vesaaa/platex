@@ -40,6 +40,15 @@ func TestRerankAmbiguousPlate_Y6Tail(t *testing.T) {
 	}
 }
 
+func TestRerankAmbiguousPlate_TailTransposition(t *testing.T) {
+	in := "粤L02Y16"
+	confs := []float32{0.95, 0.93, 0.90, 0.89, 0.88, 0.86, 0.91}
+	out, _, _ := rerankAmbiguousPlate(in, confs, 0)
+	if out != "粤L021Y6" {
+		t.Fatalf("expected rerank to produce 粤L021Y6, got %s", out)
+	}
+}
+
 func TestUpscaleImage(t *testing.T) {
 	src := image.NewNRGBA(image.Rect(0, 0, 10, 8))
 	up := upscaleImage(src, 2)
