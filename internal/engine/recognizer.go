@@ -15,10 +15,12 @@ import (
 
 // Recognizer handles license plate character recognition using CRNN model.
 type Recognizer struct {
-	model      *Model
+	model       *Model
 	inputWidth  int
 	inputHeight int
 	resizeMode  string // "auto", "letterbox", or "stretch"
+	timeSteps   int    // Detected from model output
+	numClasses  int    // Detected from model output
 }
 
 // NewRecognizer creates a new plate character recognizer.
@@ -28,12 +30,24 @@ func NewRecognizer(modelPath string, threads, optLevel int) (*Recognizer, error)
 		return nil, fmt.Errorf("load recognizer model: %w", err)
 	}
 
-	return &Recognizer{
-		model:      model,
-		inputWidth:  160, // HyperLPR3 rpv3_mdict model input width
-		inputHeight: 48,  // HyperLPR3 rpv3_mdict model input height
+	r := &Recognizer{
+		model:       model,
+		inputWidth:  160,
+		inputHeight: 48,
 		resizeMode:  "auto",
-	}, nil
+		timeSteps:   20, // Default fallback
+		numClasses:  78, // Default fallback
+	}
+
+	// Try to detect actual shape from model
+	shape := model.GetOutputShape()
+	if len(shape) >= 3 {
+		r.timeSteps = int(shape[len(shape)-2])
+		r.numClasses = int(shape[len(shape)-1])
+		slog.Info("Recognizer adapted to model shape", "timeSteps", r.timeSteps, "numClasses", r.numClasses)
+	}
+
+	return r, nil
 }
 
 // Recognize performs character recognition on a cropped plate image.
@@ -74,11 +88,10 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 		slog.Debug("Raw model output stats", "len", len(output), "min", min, "max", max, "first_5", output[:minInt(len(output), 5)])
 	}
 
-	// CTC decode: model outputs [40, 6625] but only first 77 indices are valid chars
-	numClasses := len(output) / r.getOutputTimeSteps() // = 6625
-	plateNumber, charConfs, avgConf := ctcDecode(output, r.getOutputTimeSteps(), numClasses)
+	// CTC decode: use detected model output dimensions
+	plateNumber, charConfs, avgConf := ctcDecode(output, r.timeSteps, r.numClasses)
 
-	slog.Debug("Recognition result", "plate", plateNumber, "conf", avgConf, "steps", r.getOutputTimeSteps(), "classes", numClasses)
+	slog.Info("Recognition result", "plate", plateNumber, "conf", avgConf, "steps", r.timeSteps, "classes", r.numClasses)
 
 	return plateNumber, charConfs, avgConf, nil
 }
@@ -127,9 +140,9 @@ func ctcDecode(output []float32, timeSteps, numClasses int) (string, []float32, 
 			if maxIdx < len(plateChars) {
 				chars = append(chars, plateChars[maxIdx])
 				confs = append(confs, conf)
-				slog.Debug("CTC token", "t", t, "idx", maxIdx, "char", plateChars[maxIdx], "conf", conf)
+				slog.Info("CTC token", "t", t, "idx", maxIdx, "char", plateChars[maxIdx], "conf", conf)
 			} else {
-				slog.Debug("CTC token ignored (index out of range)", "t", t, "idx", maxIdx, "conf", conf)
+				slog.Info("CTC token ignored (index out of range)", "t", t, "idx", maxIdx, "conf", conf)
 			}
 		}
 		prevIdx = maxIdx

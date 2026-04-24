@@ -147,6 +147,14 @@ func (m *Model) RunInference(inputData []float32) ([]float32, error) {
 	return result, nil
 }
 
+// GetOutputShape returns the dimensions of the model's output tensor.
+func (m *Model) GetOutputShape() []int64 {
+	if m.outputTensor == nil {
+		return nil
+	}
+	return m.outputTensor.GetShape().GetDimensions()
+}
+
 // Close releases the model resources.
 func (m *Model) Close() {
 	if m.session != nil {

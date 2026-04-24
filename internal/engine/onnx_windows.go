@@ -31,6 +31,11 @@ func (m *Model) RunInference(inputData []float32) ([]float32, error) {
 	return nil, fmt.Errorf("real model inference is only supported on Linux")
 }
 
+// GetOutputShape returns the dimensions of the model's output tensor (Mock).
+func (m *Model) GetOutputShape() []int64 {
+	return []int64{1, 20, 78}
+}
+
 // Close releases the model resources.
 func (m *Model) Close() {
 	slog.Info("Model released (Mock)", "name", m.name)
