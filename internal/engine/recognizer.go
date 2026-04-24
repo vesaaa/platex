@@ -71,26 +71,29 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 		conf:  avgConf,
 		score: scorePlateCandidate(plateNumber, avgConf),
 	}
-	crops := r.candidateCrops(img)
-	crops = append(crops, r.candidateCrops(upscaleImage(img, 2))...)
+	recoverySources := r.recoveryVariants(img)
 	angles := r.candidateAngles(img)
-	for _, cimg := range crops {
-		for _, angle := range angles {
-			candImg := cimg
-			if angle != 0 {
-				candImg = rotateImageGrayBG(cimg, angle)
-			}
-			pn, pc, cf, e := r.recognizeSingleAngle(candImg)
-			if e != nil {
-				continue
-			}
-			score := scorePlateCandidate(pn, cf)
-			if score > best.score {
-				best = recognizeCandidateResult{
-					plate: pn,
-					confs: pc,
-					conf:  cf,
-					score: score,
+	for _, srcImg := range recoverySources {
+		crops := r.candidateCrops(srcImg)
+		crops = append(crops, r.candidateCrops(upscaleImage(srcImg, 2))...)
+		for _, cimg := range crops {
+			for _, angle := range angles {
+				candImg := cimg
+				if angle != 0 {
+					candImg = rotateImageGrayBG(cimg, angle)
+				}
+				pn, pc, cf, e := r.recognizeSingleAngle(candImg)
+				if e != nil {
+					continue
+				}
+				score := scorePlateCandidate(pn, cf)
+				if score > best.score {
+					best = recognizeCandidateResult{
+						plate: pn,
+						confs: pc,
+						conf:  cf,
+						score: score,
+					}
 				}
 			}
 		}
@@ -116,6 +119,15 @@ func needRecoverySearch(plate string, conf float32) bool {
 		return true
 	}
 	return conf < 0.70
+}
+
+func (r *Recognizer) recoveryVariants(img image.Image) []image.Image {
+	return []image.Image{
+		img,
+		enhanceGrayContrast(img),
+		unsharpMask(img),
+		adaptiveGrayBoost(img),
+	}
 }
 
 func (r *Recognizer) candidateCrops(img image.Image) []image.Image {
@@ -440,6 +452,114 @@ func upscaleImage(src image.Image, scale int) image.Image {
 		}
 	}
 	return dst
+}
+
+func enhanceGrayContrast(src image.Image) image.Image {
+	b := src.Bounds()
+	dst := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	// Linear contrast stretch around mid-point.
+	const alpha = 1.35
+	const beta = -20.0
+	for y := 0; y < b.Dy(); y++ {
+		for x := 0; x < b.Dx(); x++ {
+			r, g, bl, _ := src.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			rr := clamp8(alpha*float64(r>>8) + beta)
+			gg := clamp8(alpha*float64(g>>8) + beta)
+			bb := clamp8(alpha*float64(bl>>8) + beta)
+			dst.SetNRGBA(x, y, color.NRGBA{R: rr, G: gg, B: bb, A: 255})
+		}
+	}
+	return dst
+}
+
+func unsharpMask(src image.Image) image.Image {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w < 3 || h < 3 {
+		return src
+	}
+	blur := image.NewNRGBA(image.Rect(0, 0, w, h))
+	kernel := [3][3]float64{
+		{1, 2, 1},
+		{2, 4, 2},
+		{1, 2, 1},
+	}
+	for y := 1; y < h-1; y++ {
+		for x := 1; x < w-1; x++ {
+			var sr, sg, sb float64
+			var sw float64
+			for ky := -1; ky <= 1; ky++ {
+				for kx := -1; kx <= 1; kx++ {
+					wv := kernel[ky+1][kx+1]
+					r, g, bl, _ := src.At(b.Min.X+x+kx, b.Min.Y+y+ky).RGBA()
+					sr += float64(r>>8) * wv
+					sg += float64(g>>8) * wv
+					sb += float64(bl>>8) * wv
+					sw += wv
+				}
+			}
+			blur.SetNRGBA(x, y, color.NRGBA{
+				R: clamp8(sr / sw),
+				G: clamp8(sg / sw),
+				B: clamp8(sb / sw),
+				A: 255,
+			})
+		}
+	}
+	dst := image.NewNRGBA(image.Rect(0, 0, w, h))
+	const amount = 1.1
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			or, og, ob, _ := src.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			br, bg, bb, _ := blur.At(x, y).RGBA()
+			rr := clamp8(float64(or>>8) + amount*(float64(or>>8)-float64(br>>8)))
+			gg := clamp8(float64(og>>8) + amount*(float64(og>>8)-float64(bg>>8)))
+			bb2 := clamp8(float64(ob>>8) + amount*(float64(ob>>8)-float64(bb>>8)))
+			dst.SetNRGBA(x, y, color.NRGBA{R: rr, G: gg, B: bb2, A: 255})
+		}
+	}
+	return dst
+}
+
+func adaptiveGrayBoost(src image.Image) image.Image {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	dst := image.NewNRGBA(image.Rect(0, 0, w, h))
+	var sum float64
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			r, g, bl, _ := src.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			gray := 0.299*float64(r>>8) + 0.587*float64(g>>8) + 0.114*float64(bl>>8)
+			sum += gray
+		}
+	}
+	mean := sum / float64(w*h)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			r, g, bl, _ := src.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			gray := 0.299*float64(r>>8) + 0.587*float64(g>>8) + 0.114*float64(bl>>8)
+			// Lift mid-tones and suppress bright border pollution.
+			v := gray
+			if gray > mean+25 {
+				v = gray * 0.88
+			} else if gray < mean-20 {
+				v = gray * 1.10
+			}
+			g8 := clamp8(v)
+			dst.SetNRGBA(x, y, color.NRGBA{R: g8, G: g8, B: g8, A: 255})
+		}
+	}
+	return dst
+}
+
+func clamp8(v float64) uint8 {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return uint8(v)
 }
 
 func mainlandFormatScore(r []rune) float32 {

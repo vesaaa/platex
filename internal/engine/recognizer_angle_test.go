@@ -67,4 +67,13 @@ func TestUpscaleImage(t *testing.T) {
 	}
 }
 
+func TestRecoveryVariants(t *testing.T) {
+	r := &Recognizer{}
+	img := image.NewNRGBA(image.Rect(0, 0, 32, 16))
+	variants := r.recoveryVariants(img)
+	if len(variants) < 4 {
+		t.Fatalf("expected at least 4 recovery variants, got %d", len(variants))
+	}
+}
+
 
