@@ -407,14 +407,8 @@ func (e *Engine) retryCropWithTweaks(img image.Image, resizeMode string) *types.
 		}
 		// Guardrail: retry path should only accept structurally reliable outputs.
 		// This avoids replacing "no result" with a clearly wrong noisy candidate.
-		if plate.Confidence < max(e.config.Rec.MinConfidence, 0.52) {
+		if plate.Type == types.PlateTypeUnknown || plate.Confidence < max(0.68, e.config.Rec.MinConfidence) {
 			continue
-		}
-		if plate.Type == types.PlateTypeUnknown {
-			plateRunes := []rune(strings.TrimSpace(plate.PlateNumber))
-			if len(plateRunes) < 7 || len(plateRunes) > 9 || !looksLikeMainlandPlatePrefix(plateRunes) {
-				continue
-			}
 		}
 		return plate
 	}
