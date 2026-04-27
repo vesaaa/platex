@@ -415,11 +415,6 @@ func (e *Engine) retryCropWithTweaks(img image.Image, resizeMode string) *types.
 			if len(plateRunes) < 7 || len(plateRunes) > 9 || !looksLikeMainlandPlatePrefix(plateRunes) {
 				continue
 			}
-			// Unknown-type outputs are risky on retry path; require stronger confidence
-			// to avoid reintroducing noisy candidates like "粤AAF5641".
-			if plate.Confidence < max(e.config.Rec.MinConfidence, 0.72) {
-				continue
-			}
 		}
 		return plate
 	}
