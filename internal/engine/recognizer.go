@@ -874,20 +874,6 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 		confs = append(confs, confs[len(confs)-1]*0.95)
 	}
 
-	// Soft correction 4:
-	// If we got 8 chars but it does not match new-energy marker pattern (D/F),
-	// trim a low-confidence trailing extra letter noise.
-	// Example: 粤LRA716L -> 粤LRA716
-	if len(r) == 8 &&
-		looksLikeMainlandPlatePrefix(r) &&
-		!looksLikeNewEnergyPlate(r) &&
-		isASCIILetter(r[7]) &&
-		unicode.IsDigit(r[6]) &&
-		confs[7] < 0.95 {
-		r = r[:7]
-		confs = confs[:7]
-	}
-
 	return string(r), confs
 }
 
@@ -917,29 +903,6 @@ func looksLikeMainlandPlatePrefix(r []rune) bool {
 	}
 	// Typical structure starts with province Chinese char + Latin letter.
 	return isChineseRune(r[0]) && isASCIILetter(r[1])
-}
-
-func looksLikeNewEnergyPlate(r []rune) bool {
-	if len(r) != 8 || !looksLikeMainlandPlatePrefix(r) {
-		return false
-	}
-	// Mainland NEV markers: D/F at third char(small NEV) or last char(large NEV).
-	mid := unicode.ToUpper(r[2])
-	last := unicode.ToUpper(r[7])
-	if mid == 'D' || mid == 'F' || last == 'D' || last == 'F' {
-		return true
-	}
-	// Local extension currently observed in production rollout:
-	// e.g. 粤AP00000.
-	if unicode.ToUpper(r[1]) == 'A' && mid == 'P' {
-		for i := 3; i < 8; i++ {
-			if !unicode.IsDigit(r[i]) {
-				return false
-			}
-		}
-		return true
-	}
-	return false
 }
 
 // runInference executes the ONNX model.
@@ -1013,7 +976,7 @@ func ctcDecode(output []float32, timeSteps, numClasses int) (string, []float32, 
 func classifyPlateType(plateNumber string) types.PlateType {
 	runes := []rune(plateNumber)
 	switch {
-	case len(runes) == 8 && looksLikeNewEnergyPlate(runes):
+	case len(runes) == 8:
 		return types.PlateTypeNewEnergy
 	case len(runes) == 7:
 		return types.PlateTypeStandard7
