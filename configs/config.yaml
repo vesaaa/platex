@@ -9,8 +9,8 @@ server:
   max_request_body: 100MB
 
 engine:
-  # 默认识别模式: "auto"=按图像比例自动路由, "crop"=车牌小图识别, "full"=全图检测+识别
-  mode: "auto"
+  # 默认识别模式: "crop" = 车牌小图识别, "full" = 全图检测+识别
+  mode: "crop"
   # Worker数量, 0 = 自动 (CPU核心数 * 0.75)
   workers: 0
   # 投递到识别 worker 队列的等待超时 (毫秒), 避免瞬时拥塞直接丢图
@@ -32,8 +32,6 @@ engine:
     min_confidence: 0.6
     # 全图模式下单图最大车牌数
     max_plates: 10
-    # full 模式默认最多识别的候选框数量（可被请求 options.max_plates 覆盖）
-    full_max_plates: 3
 
   detection:
     # full 模式检测置信度阈值，越低召回越高但误检可能增加

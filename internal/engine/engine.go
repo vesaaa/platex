@@ -22,11 +22,6 @@ import (
 	"github.com/vesaa/platex/internal/types"
 )
 
-const (
-	plateAspectRatioTarget    = 3.33
-	plateAspectRatioTolerance = 0.10
-)
-
 // Engine is the main license plate recognition engine.
 type Engine struct {
 	detector   *Detector
@@ -46,10 +41,11 @@ type Engine struct {
 
 // recognizeJob represents a unit of work for the worker pool.
 type recognizeJob struct {
-	img      image.Image
-	resizeMode string
-	resultCh chan *types.PlateResult
-	errCh    chan error
+	img           image.Image
+	resizeMode    string
+	minConfidence float32
+	resultCh      chan *types.PlateResult
+	errCh         chan error
 }
 
 // New creates and initializes the recognition engine.
@@ -127,7 +123,7 @@ func (e *Engine) worker(id int) {
 	slog.Debug("Worker started", "id", id)
 
 	for job := range e.workerCh {
-		result, err := e.recognizeSingle(job.img, job.resizeMode)
+		result, err := e.recognizeSingle(job.img, job.resizeMode, job.minConfidence)
 		if err != nil {
 			job.errCh <- err
 		} else {
@@ -139,7 +135,7 @@ func (e *Engine) worker(id int) {
 }
 
 // recognizeSingle performs recognition on a single image.
-func (e *Engine) recognizeSingle(img image.Image, resizeMode string) (*types.PlateResult, error) {
+func (e *Engine) recognizeSingle(img image.Image, resizeMode string, minConfidence float32) (*types.PlateResult, error) {
 	if e.recognizer == nil {
 		return nil, fmt.Errorf("recognizer model not loaded")
 	}
@@ -150,7 +146,11 @@ func (e *Engine) recognizeSingle(img image.Image, resizeMode string) (*types.Pla
 		return nil, fmt.Errorf("recognition: %w", err)
 	}
 
-	if plateNumber == "" || confidence < e.config.Rec.MinConfidence {
+	effectiveMinConf := e.config.Rec.MinConfidence
+	if minConfidence > 0 {
+		effectiveMinConf = minConfidence
+	}
+	if plateNumber == "" || confidence < effectiveMinConf {
 		// Not an error - just no plate detected with sufficient confidence
 		return nil, nil
 	}
@@ -175,8 +175,8 @@ func (e *Engine) recognizeSingle(img image.Image, resizeMode string) (*types.Pla
 		)
 		colorCode = int(types.ColorGreen)
 	}
-	// For standard 7-char civilian plates, low-confidence green predictions are
-	// often blue/green boundary errors; bias back to blue conservatively.
+	// Standard 7-char civilian plates are predominantly blue/yellow/white/black.
+	// When classifier predicts green with low confidence, bias back to blue.
 	if plateType == types.PlateTypeStandard7 &&
 		colorCode == int(types.ColorGreen) &&
 		colorConf < 0.90 {
@@ -212,11 +212,10 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 	if opts != nil && opts.MinConfidence > 0 {
 		minConf = opts.MinConfidence
 	}
-	_ = minConf // Will be used when model is integrated
 
 	// Normalize mode
 	if mode == "" {
-		mode = "auto"
+		mode = "crop"
 	}
 
 	resizeMode := "auto"
@@ -243,17 +242,8 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 				return
 			}
 
-			effectiveMode := mode
-			if mode == "auto" {
-				if shouldUseCropByAspect(img) {
-					effectiveMode = "crop"
-				} else {
-					effectiveMode = "full"
-				}
-			}
-
-			if effectiveMode == "full" {
-				plates, recErr := e.recognizeFull(img, opts, resizeMode)
+			if mode == "full" {
+				plates, recErr := e.recognizeFull(img, opts, resizeMode, minConf)
 				if recErr != nil {
 					result.Error = recErr.Error()
 				} else {
@@ -269,10 +259,11 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 
 			// Submit to worker pool (crop mode)
 			job := &recognizeJob{
-				img:      img,
-				resizeMode: resizeMode,
-				resultCh: make(chan *types.PlateResult, 1),
-				errCh:    make(chan error, 1),
+				img:           img,
+				resizeMode:    resizeMode,
+				minConfidence: minConf,
+				resultCh:      make(chan *types.PlateResult, 1),
+				errCh:         make(chan error, 1),
 			}
 
 			submitTimeout := time.Duration(max(50, e.config.SubmitTimeoutMs)) * time.Millisecond
@@ -293,16 +284,15 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 					result.Error = err.Error()
 				}
 			case <-timer.C:
-				result.Error = "worker queue submit timeout, try again later"
-			}
-
-			// Crop second-pass retry:
-			// If crop mode produced no plate, retry with lightweight image tweaks
-			// while staying in crop pipeline (no full-mode fallback).
-			if effectiveMode == "crop" && result.Error == "" && len(result.Plates) == 0 {
-				if plate := e.retryCropWithTweaks(img, resizeMode); plate != nil {
+				// Fallback to inline execution instead of dropping this image.
+				plate, runErr := e.recognizeSingle(img, resizeMode, minConf)
+				if runErr != nil {
+					result.Error = runErr.Error()
+				} else if plate != nil {
 					result.Plates = []types.PlateResult{*plate}
 					e.totalPlates.Add(1)
+				} else {
+					result.Plates = []types.PlateResult{}
 				}
 			}
 
@@ -324,7 +314,7 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 	return results
 }
 
-func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, resizeMode string) ([]types.PlateResult, error) {
+func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, resizeMode string, minConfidence float32) ([]types.PlateResult, error) {
 	if e.detector == nil {
 		return nil, fmt.Errorf("detector model not loaded")
 	}
@@ -336,104 +326,21 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 		return []types.PlateResult{}, nil
 	}
 
-	maxPlates := resolveMaxPlatesByMode(e.config.Rec.MaxPlates, e.config.Rec.FullMaxPlates, "full", opts)
-	filtered := make([][4]int, 0, len(boxes))
+	maxPlates := resolveMaxPlates(e.config.Rec.MaxPlates, opts)
+	if len(boxes) > maxPlates {
+		boxes = boxes[:maxPlates]
+	}
+
+	results := make([]types.PlateResult, 0, len(boxes))
 	for _, b := range boxes {
-		if isLikelyPlateBox(img.Bounds(), b) {
-			filtered = append(filtered, b)
+		crop := cropImage(img, b[0], b[1], b[2], b[3])
+		plate, recErr := e.recognizeSingle(crop, resizeMode, minConfidence)
+		if recErr != nil || plate == nil {
+			continue
 		}
-	}
-	if len(filtered) == 0 {
-		filtered = boxes
-	}
-	if len(filtered) > maxPlates {
-		filtered = filtered[:maxPlates]
-	}
-
-	workers := max(1, min(e.config.Workers, len(filtered)))
-	sem := make(chan struct{}, workers)
-	ordered := make([]*types.PlateResult, len(filtered))
-	var wg sync.WaitGroup
-	for i, b := range filtered {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(idx int, box [4]int) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			crop := cropImage(img, box[0], box[1], box[2], box[3])
-			plate, recErr := e.recognizeSingle(crop, resizeMode)
-			if recErr != nil || plate == nil {
-				return
-			}
-			ordered[idx] = plate
-		}(i, b)
-	}
-	wg.Wait()
-
-	results := make([]types.PlateResult, 0, len(filtered))
-	for _, plate := range ordered {
-		if plate != nil {
-			results = append(results, *plate)
-		}
+		results = append(results, *plate)
 	}
 	return results, nil
-}
-
-func shouldUseCropByAspect(img image.Image) bool {
-	b := img.Bounds()
-	w, h := b.Dx(), b.Dy()
-	if w <= 0 || h <= 0 {
-		return false
-	}
-	ratio := float64(w) / float64(h)
-	minRatio := plateAspectRatioTarget * (1.0 - plateAspectRatioTolerance)
-	maxRatio := plateAspectRatioTarget * (1.0 + plateAspectRatioTolerance)
-	return ratio >= minRatio && ratio <= maxRatio
-}
-
-func (e *Engine) retryCropWithTweaks(img image.Image, resizeMode string) *types.PlateResult {
-	// Keep retry path short and generic: each variant is cheap and broadly useful.
-	variants := []image.Image{
-		softenContrast(img),
-		unsharpMask(img),
-		adaptiveGrayBoost(img),
-		enhanceGrayContrast(img),
-		trimWhiteFrame(img),
-		upscaleImage(img, 2),
-	}
-	var best *types.PlateResult
-	bestScore := float32(-1e9)
-	for _, v := range variants {
-		plate, err := e.recognizeSingle(v, resizeMode)
-		if err != nil || plate == nil {
-			continue
-		}
-		// Guardrail: retry path should only accept structurally reliable outputs.
-		// This avoids replacing "no result" with a clearly wrong noisy candidate.
-		if plate.Confidence < max(e.config.Rec.MinConfidence, 0.52) {
-			continue
-		}
-		if plate.Type == types.PlateTypeUnknown {
-			plateRunes := []rune(strings.TrimSpace(plate.PlateNumber))
-			if len(plateRunes) < 7 || len(plateRunes) > 9 || !looksLikeMainlandPlatePrefix(plateRunes) {
-				continue
-			}
-			// Unknown-type outputs are risky on retry path; require stronger confidence
-			// to avoid reintroducing noisy candidates like "粤AAF5641".
-			if plate.Confidence < max(e.config.Rec.MinConfidence, 0.72) {
-				continue
-			}
-		}
-		score := scorePlateCandidate(plate.PlateNumber, plate.Confidence)
-		if plate.Type == types.PlateTypeUnknown {
-			score -= 6
-		}
-		if score > bestScore {
-			bestScore = score
-			best = plate
-		}
-	}
-	return best
 }
 
 // decodeInput converts an ImageInput to a Go image.Image.
@@ -597,11 +504,8 @@ func isPrivateOrLocalIP(ip net.IP) bool {
 	return false
 }
 
-func resolveMaxPlatesByMode(defaultMax, defaultFullMax int, mode string, opts *types.RecognizeOption) int {
+func resolveMaxPlates(defaultMax int, opts *types.RecognizeOption) int {
 	maxPlates := defaultMax
-	if mode == "full" && defaultFullMax > 0 {
-		maxPlates = defaultFullMax
-	}
 	if opts != nil && opts.MaxPlates > 0 {
 		maxPlates = opts.MaxPlates
 	}
@@ -609,25 +513,6 @@ func resolveMaxPlatesByMode(defaultMax, defaultFullMax int, mode string, opts *t
 		return 10
 	}
 	return maxPlates
-}
-
-func isLikelyPlateBox(bounds image.Rectangle, box [4]int) bool {
-	bw := box[2] - box[0]
-	bh := box[3] - box[1]
-	if bw < 8 || bh < 8 {
-		return false
-	}
-	ratio := float64(bw) / float64(bh)
-	if ratio < 1.6 || ratio > 6.5 {
-		return false
-	}
-	imgArea := float64(bounds.Dx() * bounds.Dy())
-	boxArea := float64(bw * bh)
-	if imgArea <= 0 {
-		return false
-	}
-	areaRatio := boxArea / imgArea
-	return areaRatio >= 0.003 && areaRatio <= 0.60
 }
 
 func shouldRetryStatusError(err error) bool {

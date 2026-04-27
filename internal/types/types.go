@@ -66,7 +66,7 @@ type ImageResult struct {
 // RecognizeRequest represents the HTTP request body.
 type RecognizeRequest struct {
 	Images  []ImageInput     `json:"images"`
-	Mode    string           `json:"mode,omitempty"` // "auto" (default), "crop", or "full"
+	Mode    string           `json:"mode,omitempty"` // "crop" (default) or "full"
 	Options *RecognizeOption `json:"options,omitempty"`
 }
 

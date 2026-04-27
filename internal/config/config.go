@@ -27,7 +27,7 @@ type ServerConfig struct {
 
 // EngineConfig holds inference engine settings.
 type EngineConfig struct {
-	Mode      string          `yaml:"mode"`    // "auto", "crop" or "full"
+	Mode      string          `yaml:"mode"`    // "crop" or "full"
 	Workers   int             `yaml:"workers"` // 0 = auto
 	SubmitTimeoutMs int       `yaml:"submit_timeout_ms"`
 	Models    ModelsConfig    `yaml:"models"`
@@ -54,7 +54,6 @@ type ONNXConfig struct {
 type RecConfig struct {
 	MinConfidence float32 `yaml:"min_confidence"`
 	MaxPlates     int     `yaml:"max_plates"`
-	FullMaxPlates int     `yaml:"full_max_plates"`
 }
 
 // DetectionConfig holds full-mode detector postprocess thresholds.
@@ -100,7 +99,7 @@ func DefaultConfig() *Config {
 			MaxRequestBody: "100MB",
 		},
 		Engine: EngineConfig{
-			Mode:    "auto",
+			Mode:    "crop",
 			Workers: workers,
 			SubmitTimeoutMs: 300,
 			Models: ModelsConfig{
@@ -115,7 +114,6 @@ func DefaultConfig() *Config {
 			Rec: RecConfig{
 				MinConfidence: 0.6,
 				MaxPlates:     10,
-				FullMaxPlates: 3,
 			},
 			Detection: DetectionConfig{
 				ConfThreshold: 0.30,
