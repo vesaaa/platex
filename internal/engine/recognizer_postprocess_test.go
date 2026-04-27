@@ -41,4 +41,40 @@ func TestNormalizePlateNumberWithConfidence_AppendLastDigitForLen6(t *testing.T)
 	}
 }
 
+func TestNormalizePlateNumberWithConfidence_TrimNonNEVTrailingLetter(t *testing.T) {
+	in := "粤LRA716L"
+	want := "粤LRA716"
+	confs := []float32{0.98, 0.96, 0.95, 0.94, 0.93, 0.94, 0.95, 0.91}
+	got, _ := normalizePlateNumberWithConfidence(in, confs)
+	if got != want {
+		t.Fatalf("normalizePlateNumberWithConfidence(%q)=%q, want=%q", in, got, want)
+	}
+}
+
+func TestClassifyPlateType_StrictNewEnergyPattern(t *testing.T) {
+	if got := classifyPlateType("粤LRA716L"); got != "unknown" {
+		t.Fatalf("classifyPlateType(粤LRA716L)=%q, want unknown", got)
+	}
+	if got := classifyPlateType("粤AD12345"); got != "new_energy" {
+		t.Fatalf("classifyPlateType(粤AD12345)=%q, want new_energy", got)
+	}
+	if got := classifyPlateType("粤LRA716"); got != "standard_7" {
+		t.Fatalf("classifyPlateType(粤LRA716)=%q, want standard_7", got)
+	}
+	if got := classifyPlateType("粤AP00000"); got != "new_energy" {
+		t.Fatalf("classifyPlateType(粤AP00000)=%q, want new_energy", got)
+	}
+}
+
+func TestNormalizePlateNumberWithConfidence_TrimNinthNoiseForNEV(t *testing.T) {
+	in := "湘AF555641"
+	want := "湘AF55564"
+	confs := []float32{0.98, 0.97, 0.96, 0.95, 0.94, 0.94, 0.93, 0.92, 0.58}
+	got, _ := normalizePlateNumberWithConfidence(in, confs)
+	if got != want {
+		t.Fatalf("normalizePlateNumberWithConfidence(%q)=%q, want=%q", in, got, want)
+	}
+}
+
+
 

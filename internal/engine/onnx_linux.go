@@ -129,6 +129,8 @@ func (m *Model) RunInference(inputData []float32) ([]float32, error) {
 	if m.session == nil {
 		return nil, fmt.Errorf("session is nil")
 	}
+	// AdvancedSession plus bound input/output tensors are shared per model.
+	// Guard the whole copy-run-copy sequence to avoid cross-request data races.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

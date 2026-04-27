@@ -653,6 +653,25 @@ func enhanceGrayContrast(src image.Image) image.Image {
 	return dst
 }
 
+// softenContrast slightly compresses contrast to suppress thin dark borders
+// that may be decoded as trailing noise characters.
+func softenContrast(src image.Image) image.Image {
+	b := src.Bounds()
+	dst := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	const alpha = 0.86
+	const beta = 14.0
+	for y := 0; y < b.Dy(); y++ {
+		for x := 0; x < b.Dx(); x++ {
+			r, g, bl, _ := src.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			rr := clamp8(alpha*float64(r>>8) + beta)
+			gg := clamp8(alpha*float64(g>>8) + beta)
+			bb := clamp8(alpha*float64(bl>>8) + beta)
+			dst.SetNRGBA(x, y, color.NRGBA{R: rr, G: gg, B: bb, A: 255})
+		}
+	}
+	return dst
+}
+
 func unsharpMask(src image.Image) image.Image {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -874,6 +893,32 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 		confs = append(confs, confs[len(confs)-1]*0.95)
 	}
 
+	// Soft correction 4:
+	// If we got 8 chars but does not match new-energy marker pattern (D/F),
+	// trim a low-confidence trailing extra character to recover common CTC tail noise.
+	// Example: 粤LRA716L -> 粤LRA716
+	if len(r) == 8 &&
+		looksLikeMainlandPlatePrefix(r) &&
+		!looksLikeNewEnergyPlate(r) &&
+		isASCIILetter(r[7]) &&
+		unicode.IsDigit(r[6]) &&
+		confs[7] < 0.95 {
+		r = r[:7]
+		confs = confs[:7]
+	}
+
+	// Soft correction 5:
+	// Some difficult crops occasionally produce 9 chars where a valid 8-char
+	// new-energy plate is followed by one noisy low-confidence tail char.
+	// Example pattern: 湘AF555641 -> 湘AF55564
+	if len(r) == 9 &&
+		len(confs) == 9 &&
+		looksLikeNewEnergyPlate(r[:8]) &&
+		confs[8] < 0.72 {
+		r = r[:8]
+		confs = confs[:8]
+	}
+
 	return string(r), confs
 }
 
@@ -903,6 +948,30 @@ func looksLikeMainlandPlatePrefix(r []rune) bool {
 	}
 	// Typical structure starts with province Chinese char + Latin letter.
 	return isChineseRune(r[0]) && isASCIILetter(r[1])
+}
+
+func looksLikeNewEnergyPlate(r []rune) bool {
+	if len(r) != 8 || !looksLikeMainlandPlatePrefix(r) {
+		return false
+	}
+	// Common mainland new-energy markers: D/F either at the 3rd char (small NEV)
+	// or the last char (large NEV).
+	mid := unicode.ToUpper(r[2])
+	last := unicode.ToUpper(r[7])
+	if mid == 'D' || mid == 'F' || last == 'D' || last == 'F' {
+		return true
+	}
+	// Local segment extension observed in official rollout notices:
+	// e.g. Guangzhou "粤AP00000" pure-electric segment (A+P+5 digits).
+	if unicode.ToUpper(r[1]) == 'A' && mid == 'P' {
+		for i := 3; i < 8; i++ {
+			if !unicode.IsDigit(r[i]) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // runInference executes the ONNX model.
@@ -976,7 +1045,7 @@ func ctcDecode(output []float32, timeSteps, numClasses int) (string, []float32, 
 func classifyPlateType(plateNumber string) types.PlateType {
 	runes := []rune(plateNumber)
 	switch {
-	case len(runes) == 8:
+	case len(runes) == 8 && looksLikeNewEnergyPlate(runes):
 		return types.PlateTypeNewEnergy
 	case len(runes) == 7:
 		return types.PlateTypeStandard7
