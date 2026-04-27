@@ -7,19 +7,24 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
+	"runtime"
+	"strconv"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
 
-// Model wraps an ONNX Runtime inference session.
-type Model struct {
+type modelRunner struct {
 	session      *ort.AdvancedSession
-	name         string
 	inputTensor  *ort.Tensor[float32]
 	outputTensor *ort.Tensor[float32]
-	outputShape  []int64
-	mu           sync.Mutex
+}
+
+// Model wraps an ONNX Runtime inference session.
+type Model struct {
+	name        string
+	outputShape []int64
+	runners     []*modelRunner
+	pool        chan *modelRunner
 }
 
 // initONNXRuntime initializes the ONNX Runtime shared library.
@@ -42,7 +47,57 @@ func destroyONNXRuntime() error {
 	return ort.DestroyEnvironment()
 }
 
-// loadModel loads an ONNX model file and creates a real session on Linux.
+func resolvePoolSize() int {
+	// Optional runtime override for throughput tuning.
+	if raw := os.Getenv("PLATEX_MODEL_POOL_SIZE"); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			if v > 8 {
+				return 8
+			}
+			return v
+		}
+	}
+	cpu := runtime.NumCPU()
+	auto := cpu / 4
+	if auto < 2 {
+		auto = 2
+	}
+	if auto > 6 {
+		auto = 6
+	}
+	return auto
+}
+
+func createRunner(absPath string, opts *ort.SessionOptions, inputName, outputName string, inShape, outShape []int64) (*modelRunner, error) {
+	inTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(inShape...))
+	if err != nil {
+		return nil, fmt.Errorf("create input tensor: %w", err)
+	}
+	outTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(outShape...))
+	if err != nil {
+		inTensor.Destroy()
+		return nil, fmt.Errorf("create output tensor: %w", err)
+	}
+	session, err := ort.NewAdvancedSession(absPath,
+		[]string{inputName},
+		[]string{outputName},
+		[]ort.ArbitraryTensor{inTensor},
+		[]ort.ArbitraryTensor{outTensor},
+		opts,
+	)
+	if err != nil {
+		inTensor.Destroy()
+		outTensor.Destroy()
+		return nil, fmt.Errorf("create session: %w", err)
+	}
+	return &modelRunner{
+		session:      session,
+		inputTensor:  inTensor,
+		outputTensor: outTensor,
+	}, nil
+}
+
+// loadModel loads an ONNX model file and creates real sessions on Linux.
 func loadModel(modelPath string, threads int, optLevel int) (*Model, error) {
 	absPath, err := filepath.Abs(modelPath)
 	if err != nil {
@@ -86,55 +141,47 @@ func loadModel(modelPath string, threads int, optLevel int) (*Model, error) {
 	}
 	slog.Info("Model input info", "name", inputs[0].Name, "shape", inShape)
 
-	inTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(inShape...))
-	if err != nil {
-		return nil, fmt.Errorf("create input tensor: %w", err)
-	}
-
 	outShape := outputs[0].Dimensions
 	if outShape[0] == -1 {
 		outShape[0] = 1
 	}
 	slog.Info("Model output info", "name", outputs[0].Name, "shape", outShape)
-	outTensor, err := ort.NewEmptyTensor[float32](ort.NewShape(outShape...))
-	if err != nil {
-		inTensor.Destroy()
-		return nil, fmt.Errorf("create output tensor: %w", err)
-	}
 
-	session, err := ort.NewAdvancedSession(absPath,
-		[]string{inputs[0].Name},
-		[]string{outputs[0].Name},
-		[]ort.ArbitraryTensor{inTensor},
-		[]ort.ArbitraryTensor{outTensor},
-		opts,
-	)
-	if err != nil {
-		inTensor.Destroy()
-		outTensor.Destroy()
-		return nil, fmt.Errorf("create session: %w", err)
+	poolSize := resolvePoolSize()
+	runners := make([]*modelRunner, 0, poolSize)
+	pool := make(chan *modelRunner, poolSize)
+	for i := 0; i < poolSize; i++ {
+		runner, err := createRunner(absPath, opts, inputs[0].Name, outputs[0].Name, inShape, outShape)
+		if err != nil {
+			for _, r := range runners {
+				r.session.Destroy()
+				r.inputTensor.Destroy()
+				r.outputTensor.Destroy()
+			}
+			return nil, err
+		}
+		runners = append(runners, runner)
+		pool <- runner
 	}
+	slog.Info("Model session pool initialized", "name", name, "pool_size", poolSize)
 
 	return &Model{
-		session:      session,
-		name:         name,
-		inputTensor:  inTensor,
-		outputTensor: outTensor,
-		outputShape:  outShape,
+		name:        name,
+		outputShape: outShape,
+		runners:     runners,
+		pool:        pool,
 	}, nil
 }
 
 // RunInference executes the ONNX model by copying data in and out.
 func (m *Model) RunInference(inputData []float32) ([]float32, error) {
-	if m.session == nil {
-		return nil, fmt.Errorf("session is nil")
+	if len(m.runners) == 0 || m.pool == nil {
+		return nil, fmt.Errorf("session pool is empty")
 	}
-	// AdvancedSession plus bound input/output tensors are shared per model.
-	// Guard the whole copy-run-copy sequence to avoid cross-request data races.
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	runner := <-m.pool
+	defer func() { m.pool <- runner }()
 
-	inData := m.inputTensor.GetData()
+	inData := runner.inputTensor.GetData()
 	if len(inputData) > len(inData) {
 		return nil, fmt.Errorf("input data too large for tensor: %d > %d", len(inputData), len(inData))
 	}
@@ -143,12 +190,12 @@ func (m *Model) RunInference(inputData []float32) ([]float32, error) {
 	copy(inData, inputData)
 
 	// Run execution
-	if err := m.session.Run(); err != nil {
+	if err := runner.session.Run(); err != nil {
 		return nil, fmt.Errorf("session run: %w", err)
 	}
 
 	// Copy output data out of the tensor
-	outData := m.outputTensor.GetData()
+	outData := runner.outputTensor.GetData()
 	result := make([]float32, len(outData))
 	copy(result, outData)
 
@@ -162,14 +209,16 @@ func (m *Model) GetOutputShape() []int64 {
 
 // Close releases the model resources.
 func (m *Model) Close() {
-	if m.session != nil {
-		m.session.Destroy()
-	}
-	if m.inputTensor != nil {
-		m.inputTensor.Destroy()
-	}
-	if m.outputTensor != nil {
-		m.outputTensor.Destroy()
+	for _, runner := range m.runners {
+		if runner.session != nil {
+			runner.session.Destroy()
+		}
+		if runner.inputTensor != nil {
+			runner.inputTensor.Destroy()
+		}
+		if runner.outputTensor != nil {
+			runner.outputTensor.Destroy()
+		}
 	}
 	slog.Info("Model released", "name", m.name)
 }

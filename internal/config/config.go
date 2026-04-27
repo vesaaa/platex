@@ -87,7 +87,7 @@ type LogConfig struct {
 
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
-	workers := runtime.NumCPU() * 3 / 4
+	workers := runtime.NumCPU()
 	if workers < 1 {
 		workers = 1
 	}
@@ -159,7 +159,7 @@ func Load(path string) (*Config, error) {
 
 	// Auto-calculate workers if set to 0
 	if cfg.Engine.Workers <= 0 {
-		cfg.Engine.Workers = runtime.NumCPU() * 3 / 4
+		cfg.Engine.Workers = runtime.NumCPU()
 		if cfg.Engine.Workers < 1 {
 			cfg.Engine.Workers = 1
 		}

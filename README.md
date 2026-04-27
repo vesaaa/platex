@@ -160,6 +160,12 @@ curl -X POST http://localhost:8080/api/v1/recognize \
 批量请求建议同时配置 `engine.submit_timeout_ms`（默认 `300ms`）：  
 当 worker 繁忙时，任务会短时阻塞等待队列而不是立即失败，超时后返回 busy 错误，兼顾吞吐与成功率。
 
+并行性能调优建议（Linux）：
+- `engine.workers=0` 时自动使用 `CPU核心数`；也可通过启动参数 `-workers N` 手动覆盖
+- `PLATEX_MODEL_POOL_SIZE`：ONNX Session 池大小（默认自动 `max(2, min(6, CPU/4))`，可手动设 `4~6`）
+- `engine.onnx.threads_per_session` 建议保持 `1`，优先通过 `workers` 与 `PLATEX_MODEL_POOL_SIZE` 提升并行
+- URL 批量场景可适当提高 `engine.url.max_fetch_concurrency`（如 `16 -> 32`）
+
 `mode=full` 的检测后处理参数由配置文件 `engine.detection` 控制：
 - `engine.detection.conf_threshold`: 检测置信度阈值（默认 `0.30`）
 - `engine.detection.iou_threshold`: NMS IoU 阈值（默认 `0.45`）
