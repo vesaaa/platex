@@ -249,7 +249,7 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 
 			effectiveMode := mode
 			if mode == "auto" {
-				if shouldPreferCropInAuto(img) {
+				if shouldUseCropByAspect(img) {
 					effectiveMode = "crop"
 				} else {
 					effectiveMode = "full"
@@ -263,15 +263,6 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 				} else {
 					result.Plates = plates
 					e.totalPlates.Add(int64(len(plates)))
-					// Auto mode fallback:
-					// some pre-cropped square-ish small images are better handled by crop.
-					if mode == "auto" && len(result.Plates) == 0 {
-						plate, cropErr := e.recognizeSingle(img, resizeMode, minConf)
-						if cropErr == nil && plate != nil {
-							result.Plates = []types.PlateResult{*plate}
-							e.totalPlates.Add(1)
-						}
-					}
 				}
 				result.ElapsedMs = time.Since(imgStart).Milliseconds()
 				e.totalImages.Add(1)
@@ -403,22 +394,6 @@ func shouldUseCropByAspect(img image.Image) bool {
 	minRatio := plateAspectRatioTarget * (1.0 - plateAspectRatioTolerance)
 	maxRatio := plateAspectRatioTarget * (1.0 + plateAspectRatioTolerance)
 	return ratio >= minRatio && ratio <= maxRatio
-}
-
-func shouldPreferCropInAuto(img image.Image) bool {
-	if shouldUseCropByAspect(img) {
-		return true
-	}
-	b := img.Bounds()
-	w, h := b.Dx(), b.Dy()
-	if w <= 0 || h <= 0 {
-		return false
-	}
-	// Heuristic for pre-cropped abnormal-ratio tiles:
-	// if the image is small, prioritize crop recognizer over full detector.
-	maxSide := max(w, h)
-	area := w * h
-	return maxSide <= 320 && area <= 120000
 }
 
 func (e *Engine) retryCropWithTweaks(img image.Image, resizeMode string, minConfidence float32) *types.PlateResult {
