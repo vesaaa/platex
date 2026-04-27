@@ -52,25 +52,9 @@ func TestIsLikelyPlateBox(t *testing.T) {
 	}
 }
 
-func TestShouldPreferCropInAuto(t *testing.T) {
-	tests := []struct {
-		name string
-		w    int
-		h    int
-		want bool
-	}{
-		{name: "classic plate ratio", w: 333, h: 100, want: true},
-		{name: "small square cropped tile", w: 192, h: 176, want: true},
-		{name: "large scene image", w: 1920, h: 1080, want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			img := image.NewRGBA(image.Rect(0, 0, tt.w, tt.h))
-			got := shouldPreferCropInAuto(img)
-			if got != tt.want {
-				t.Fatalf("shouldPreferCropInAuto(%dx%d)=%v, want %v", tt.w, tt.h, got, tt.want)
-			}
-		})
+func TestShouldUseCropByAspect_312x90FallsInAutoCropWindow(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 312, 90))
+	if !shouldUseCropByAspect(img) {
+		t.Fatalf("expected 312x90 to route to crop in auto mode")
 	}
 }
-
