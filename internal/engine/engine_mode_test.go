@@ -51,3 +51,10 @@ func TestIsLikelyPlateBox(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldUseCropByAspect_312x90FallsInAutoCropWindow(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 312, 90))
+	if !shouldUseCropByAspect(img) {
+		t.Fatalf("expected 312x90 to route to crop in auto mode")
+	}
+}

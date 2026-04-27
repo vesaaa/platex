@@ -298,6 +298,17 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 				result.Error = "worker queue submit timeout, try again later"
 			}
 
+			// Auto mode fallback:
+			// For near-plate-ratio inputs that routed to crop but produced no plate,
+			// run a second chance full-mode detection to improve recall.
+			if mode == "auto" && effectiveMode == "crop" && result.Error == "" && len(result.Plates) == 0 {
+				plates, recErr := e.recognizeFull(img, opts)
+				if recErr == nil {
+					result.Plates = plates
+					e.totalPlates.Add(int64(len(plates)))
+				}
+			}
+
 			result.ElapsedMs = time.Since(imgStart).Milliseconds()
 			e.totalImages.Add(1)
 			e.totalTimeMs.Add(result.ElapsedMs)
