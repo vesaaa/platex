@@ -188,6 +188,21 @@ func (e *Engine) recognizeSingle(img image.Image, resizeMode string, minConfiden
 		)
 		colorCode = int(types.ColorBlue)
 	}
+	// If standard-7 is predicted as yellow with low confidence but the
+	// image's dominant color is blue, prefer blue to avoid obvious blue->yellow flips.
+	if plateType == types.PlateTypeStandard7 &&
+		colorCode == int(types.ColorYellow) &&
+		colorConf < 0.90 {
+		if hasBlueDominanceOverYellow(img) {
+			slog.Info("Color corrected for standard-7 blue/yellow ambiguity",
+				"plate", plateNumber,
+				"from", colorCode,
+				"to", int(types.ColorBlue),
+				"color_conf", colorConf,
+			)
+			colorCode = int(types.ColorBlue)
+		}
+	}
 
 	colorName := "其他"
 	if name, ok := types.ColorNames[types.PlateColor(colorCode)]; ok {
@@ -296,12 +311,18 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 				}
 			}
 
-			if shouldFallbackToFull(mode, result) {
+			if reason, ok := fallbackReason(mode, img, result); ok {
+				slog.Info("Triggering full fallback",
+					"id", inp.ID,
+					"reason", reason,
+					"plate_count", len(result.Plates),
+				)
 				plates, recErr := e.recognizeFull(img, opts, resizeMode, minConf)
 				if recErr != nil {
 					// Keep crop result on fallback failure to avoid turning success into error.
 					slog.Warn("fallback full recognition failed",
 						"id", inp.ID,
+						"reason", reason,
 						"error", recErr,
 					)
 				} else {
@@ -530,20 +551,35 @@ func resolveMaxPlates(defaultMax int, opts *types.RecognizeOption) int {
 	return maxPlates
 }
 
-func shouldFallbackToFull(mode string, result types.ImageResult) bool {
+func fallbackReason(mode string, img image.Image, result types.ImageResult) (string, bool) {
 	if mode != "crop" {
-		return false
+		return "", false
 	}
 	if result.Error != "" {
-		return false
+		return "", false
 	}
 	if len(result.Plates) == 0 {
-		return true
+		return "empty", true
 	}
 	if len(result.Plates) == 1 && result.Plates[0].Type == types.PlateTypeUnknown {
-		return true
+		return "unknown", true
 	}
-	return false
+	if len(result.Plates) != 1 {
+		return "", false
+	}
+
+	plate := result.Plates[0]
+	// Square-ish/tilted inputs are a known hard case in crop flow.
+	// If confidence is not high enough, trigger full-mode fallback.
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w > 0 && h > 0 {
+		ratio := float64(w) / float64(h)
+		if ratio < 2.2 && plate.Confidence < 0.88 {
+			return "square_medium_conf", true
+		}
+	}
+	return "", false
 }
 
 func filterReliablePlates(plates []types.PlateResult) []types.PlateResult {
@@ -558,6 +594,52 @@ func filterReliablePlates(plates []types.PlateResult) []types.PlateResult {
 		filtered = append(filtered, p)
 	}
 	return filtered
+}
+
+func hasBlueDominanceOverYellow(img image.Image) bool {
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return false
+	}
+
+	// Focus on center area to reduce border and background noise.
+	marginX := w / 8
+	marginY := h / 6
+	x0, x1 := bounds.Min.X+marginX, bounds.Max.X-marginX
+	y0, y1 := bounds.Min.Y+marginY, bounds.Max.Y-marginY
+	if x1 <= x0 || y1 <= y0 {
+		x0, x1 = bounds.Min.X, bounds.Max.X
+		y0, y1 = bounds.Min.Y, bounds.Max.Y
+	}
+
+	var blueCount, yellowCount, valid int
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			r16, g16, b16, _ := img.At(x, y).RGBA()
+			r, g, b := float64(r16>>8), float64(g16>>8), float64(b16>>8)
+			hue, sat, val := rgbToHSV(r, g, b)
+			if val < 40 || sat < 35 {
+				continue
+			}
+			valid++
+			// Blue range widened vs getDominantColor to better cover dark blue plates.
+			if hue >= 170 && hue <= 270 {
+				blueCount++
+				continue
+			}
+			if hue >= 35 && hue <= 80 {
+				yellowCount++
+			}
+		}
+	}
+
+	if valid < 100 {
+		return false
+	}
+	blueRatio := float64(blueCount) / float64(valid)
+	yellowRatio := float64(yellowCount) / float64(valid)
+	return blueRatio >= 0.18 && blueRatio > yellowRatio*1.6
 }
 
 func shouldRetryStatusError(err error) bool {

@@ -1,60 +1,84 @@
 package engine
 
 import (
+	"image"
 	"testing"
 
 	"github.com/vesaa/platex/internal/types"
 )
 
-func TestShouldFallbackToFull(t *testing.T) {
+func TestFallbackReason(t *testing.T) {
+	square := image.NewNRGBA(image.Rect(0, 0, 256, 256))
+	wide := image.NewNRGBA(image.Rect(0, 0, 256, 72))
 	tests := []struct {
 		name   string
 		mode   string
+		img    image.Image
 		result types.ImageResult
-		want   bool
+		want   string
 	}{
 		{
 			name:   "non-crop mode never fallback",
 			mode:   "full",
+			img:    square,
 			result: types.ImageResult{Plates: []types.PlateResult{}},
-			want:   false,
+			want:   "",
 		},
 		{
 			name:   "error result no fallback",
 			mode:   "crop",
+			img:    square,
 			result: types.ImageResult{Error: "decode error"},
-			want:   false,
+			want:   "",
 		},
 		{
 			name:   "empty plates should fallback",
 			mode:   "crop",
+			img:    square,
 			result: types.ImageResult{Plates: []types.PlateResult{}},
-			want:   true,
+			want:   "empty",
 		},
 		{
 			name: "single unknown should fallback",
 			mode: "crop",
+			img:  square,
 			result: types.ImageResult{Plates: []types.PlateResult{
 				{PlateNumber: "粤AAF564", Type: types.PlateTypeUnknown},
 			}},
-			want: true,
+			want: "unknown",
 		},
 		{
 			name: "recognized non-unknown should not fallback",
 			mode: "crop",
+			img:  wide,
 			result: types.ImageResult{Plates: []types.PlateResult{
-				{PlateNumber: "粤LE7G22", Type: types.PlateTypeStandard7},
+				{PlateNumber: "粤LE7G22", Type: types.PlateTypeStandard7, Confidence: 0.93},
 			}},
-			want: false,
+			want: "",
+		},
+		{
+			name: "square image medium confidence should fallback",
+			mode: "crop",
+			img:  square,
+			result: types.ImageResult{Plates: []types.PlateResult{
+				{PlateNumber: "辽L021Y6", Type: types.PlateTypeStandard7, Confidence: 0.83},
+			}},
+			want: "square_medium_conf",
 		},
 	}
 
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := shouldFallbackToFull(tc.mode, tc.result)
-			if got != tc.want {
-				t.Fatalf("shouldFallbackToFull() = %v, want %v", got, tc.want)
+			reason, ok := fallbackReason(tc.mode, tc.img, tc.result)
+			if tc.want == "" {
+				if ok {
+					t.Fatalf("fallbackReason() unexpectedly triggered with reason=%q", reason)
+				}
+				return
+			}
+			if !ok || reason != tc.want {
+				t.Fatalf("fallbackReason() = (%q, %v), want (%q, true)", reason, ok, tc.want)
 			}
 		})
 	}
