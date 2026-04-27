@@ -298,14 +298,13 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 				result.Error = "worker queue submit timeout, try again later"
 			}
 
-			// Auto mode fallback:
-			// For near-plate-ratio inputs that routed to crop but produced no plate,
-			// run a second chance full-mode detection to improve recall.
-			if mode == "auto" && effectiveMode == "crop" && result.Error == "" && len(result.Plates) == 0 {
-				plates, recErr := e.recognizeFull(img, opts)
-				if recErr == nil {
-					result.Plates = plates
-					e.totalPlates.Add(int64(len(plates)))
+			// Crop second-pass retry:
+			// If crop mode produced no plate, retry with lightweight image tweaks
+			// while staying in crop pipeline (no full-mode fallback).
+			if effectiveMode == "crop" && result.Error == "" && len(result.Plates) == 0 {
+				if plate := e.retryCropWithTweaks(img); plate != nil {
+					result.Plates = []types.PlateResult{*plate}
+					e.totalPlates.Add(1)
 				}
 			}
 
@@ -392,6 +391,25 @@ func shouldUseCropByAspect(img image.Image) bool {
 	minRatio := plateAspectRatioTarget * (1.0 - plateAspectRatioTolerance)
 	maxRatio := plateAspectRatioTarget * (1.0 + plateAspectRatioTolerance)
 	return ratio >= minRatio && ratio <= maxRatio
+}
+
+func (e *Engine) retryCropWithTweaks(img image.Image) *types.PlateResult {
+	// Keep retry path short and generic: each variant is cheap and broadly useful.
+	variants := []image.Image{
+		unsharpMask(img),
+		adaptiveGrayBoost(img),
+		enhanceGrayContrast(img),
+		trimWhiteFrame(img),
+		upscaleImage(img, 2),
+	}
+	for _, v := range variants {
+		plate, err := e.recognizeSingle(v)
+		if err != nil || plate == nil {
+			continue
+		}
+		return plate
+	}
+	return nil
 }
 
 // decodeInput converts an ImageInput to a Go image.Image.
