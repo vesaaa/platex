@@ -48,7 +48,6 @@ type Engine struct {
 type recognizeJob struct {
 	img      image.Image
 	resizeMode string
-	minConfidence float32
 	resultCh chan *types.PlateResult
 	errCh    chan error
 }
@@ -128,7 +127,7 @@ func (e *Engine) worker(id int) {
 	slog.Debug("Worker started", "id", id)
 
 	for job := range e.workerCh {
-		result, err := e.recognizeSingle(job.img, job.resizeMode, job.minConfidence)
+		result, err := e.recognizeSingle(job.img, job.resizeMode)
 		if err != nil {
 			job.errCh <- err
 		} else {
@@ -140,7 +139,7 @@ func (e *Engine) worker(id int) {
 }
 
 // recognizeSingle performs recognition on a single image.
-func (e *Engine) recognizeSingle(img image.Image, resizeMode string, minConfidence float32) (*types.PlateResult, error) {
+func (e *Engine) recognizeSingle(img image.Image, resizeMode string) (*types.PlateResult, error) {
 	if e.recognizer == nil {
 		return nil, fmt.Errorf("recognizer model not loaded")
 	}
@@ -151,11 +150,7 @@ func (e *Engine) recognizeSingle(img image.Image, resizeMode string, minConfiden
 		return nil, fmt.Errorf("recognition: %w", err)
 	}
 
-	effectiveMinConf := e.config.Rec.MinConfidence
-	if minConfidence > 0 {
-		effectiveMinConf = minConfidence
-	}
-	if plateNumber == "" || confidence < effectiveMinConf {
+	if plateNumber == "" || confidence < e.config.Rec.MinConfidence {
 		// Not an error - just no plate detected with sufficient confidence
 		return nil, nil
 	}
@@ -217,6 +212,7 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 	if opts != nil && opts.MinConfidence > 0 {
 		minConf = opts.MinConfidence
 	}
+	_ = minConf // Will be used when model is integrated
 
 	// Normalize mode
 	if mode == "" {
@@ -257,7 +253,7 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 			}
 
 			if effectiveMode == "full" {
-				plates, recErr := e.recognizeFull(img, opts, resizeMode, minConf)
+				plates, recErr := e.recognizeFull(img, opts, resizeMode)
 				if recErr != nil {
 					result.Error = recErr.Error()
 				} else {
@@ -275,7 +271,6 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 			job := &recognizeJob{
 				img:      img,
 				resizeMode: resizeMode,
-				minConfidence: minConf,
 				resultCh: make(chan *types.PlateResult, 1),
 				errCh:    make(chan error, 1),
 			}
@@ -305,7 +300,7 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 			// If crop mode produced no plate, retry with lightweight image tweaks
 			// while staying in crop pipeline (no full-mode fallback).
 			if effectiveMode == "crop" && result.Error == "" && len(result.Plates) == 0 {
-				if plate := e.retryCropWithTweaks(img, resizeMode, minConf); plate != nil {
+				if plate := e.retryCropWithTweaks(img, resizeMode); plate != nil {
 					result.Plates = []types.PlateResult{*plate}
 					e.totalPlates.Add(1)
 				}
@@ -329,7 +324,7 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 	return results
 }
 
-func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, resizeMode string, minConfidence float32) ([]types.PlateResult, error) {
+func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, resizeMode string) ([]types.PlateResult, error) {
 	if e.detector == nil {
 		return nil, fmt.Errorf("detector model not loaded")
 	}
@@ -366,7 +361,7 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 			defer wg.Done()
 			defer func() { <-sem }()
 			crop := cropImage(img, box[0], box[1], box[2], box[3])
-			plate, recErr := e.recognizeSingle(crop, resizeMode, minConfidence)
+			plate, recErr := e.recognizeSingle(crop, resizeMode)
 			if recErr != nil || plate == nil {
 				return
 			}
@@ -396,7 +391,7 @@ func shouldUseCropByAspect(img image.Image) bool {
 	return ratio >= minRatio && ratio <= maxRatio
 }
 
-func (e *Engine) retryCropWithTweaks(img image.Image, resizeMode string, minConfidence float32) *types.PlateResult {
+func (e *Engine) retryCropWithTweaks(img image.Image, resizeMode string) *types.PlateResult {
 	// Keep retry path short and generic: each variant is cheap and broadly useful.
 	variants := []image.Image{
 		unsharpMask(img),
@@ -406,22 +401,13 @@ func (e *Engine) retryCropWithTweaks(img image.Image, resizeMode string, minConf
 		upscaleImage(img, 2),
 	}
 	for _, v := range variants {
-		plate, err := e.recognizeSingle(v, resizeMode, minConfidence)
+		plate, err := e.recognizeSingle(v, resizeMode)
 		if err != nil || plate == nil {
 			continue
 		}
 		// Guardrail: retry path should only accept structurally reliable outputs.
 		// This avoids replacing "no result" with a clearly wrong noisy candidate.
-		if plate.Confidence < max(minConfidence, 0.52) {
-			continue
-		}
-		if plate.Type == types.PlateTypeUnknown {
-			plateRunes := []rune(strings.TrimSpace(plate.PlateNumber))
-			if len(plateRunes) < 7 || len(plateRunes) > 8 || !looksLikeMainlandPlatePrefix(plateRunes) {
-				continue
-			}
-		}
-		if plate.Confidence < max(minConfidence, e.config.Rec.MinConfidence) && plate.Type == types.PlateTypeUnknown {
+		if plate.Type == types.PlateTypeUnknown || plate.Confidence < max(0.68, e.config.Rec.MinConfidence) {
 			continue
 		}
 		return plate
