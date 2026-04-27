@@ -407,6 +407,11 @@ func (e *Engine) retryCropWithTweaks(img image.Image) *types.PlateResult {
 		if err != nil || plate == nil {
 			continue
 		}
+		// Guardrail: retry path should only accept structurally reliable outputs.
+		// This avoids replacing "no result" with a clearly wrong noisy candidate.
+		if plate.Type == types.PlateTypeUnknown || plate.Confidence < max(0.68, e.config.Rec.MinConfidence) {
+			continue
+		}
 		return plate
 	}
 	return nil
