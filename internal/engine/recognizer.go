@@ -653,6 +653,25 @@ func enhanceGrayContrast(src image.Image) image.Image {
 	return dst
 }
 
+// softenContrast slightly compresses contrast to suppress thin dark borders
+// that may be decoded as trailing noise characters.
+func softenContrast(src image.Image) image.Image {
+	b := src.Bounds()
+	dst := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	const alpha = 0.86
+	const beta = 14.0
+	for y := 0; y < b.Dy(); y++ {
+		for x := 0; x < b.Dx(); x++ {
+			r, g, bl, _ := src.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			rr := clamp8(alpha*float64(r>>8) + beta)
+			gg := clamp8(alpha*float64(g>>8) + beta)
+			bb := clamp8(alpha*float64(bl>>8) + beta)
+			dst.SetNRGBA(x, y, color.NRGBA{R: rr, G: gg, B: bb, A: 255})
+		}
+	}
+	return dst
+}
+
 func unsharpMask(src image.Image) image.Image {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
