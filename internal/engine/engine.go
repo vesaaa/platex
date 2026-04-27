@@ -174,6 +174,19 @@ func (e *Engine) recognizeSingle(img image.Image) (*types.PlateResult, error) {
 		)
 		colorCode = int(types.ColorGreen)
 	}
+	// For standard 7-char civilian plates, low-confidence green predictions are
+	// often blue/green boundary errors; bias back to blue conservatively.
+	if plateType == types.PlateTypeStandard7 &&
+		colorCode == int(types.ColorGreen) &&
+		colorConf < 0.90 {
+		slog.Info("Color corrected for standard-7 plate",
+			"plate", plateNumber,
+			"from", colorCode,
+			"to", int(types.ColorBlue),
+			"color_conf", colorConf,
+		)
+		colorCode = int(types.ColorBlue)
+	}
 
 	colorName := "其他"
 	if name, ok := types.ColorNames[types.PlateColor(colorCode)]; ok {
