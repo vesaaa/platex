@@ -21,7 +21,6 @@ type Recognizer struct {
 	model       *Model
 	inputWidth  int
 	inputHeight int
-	resizeMode  string // "auto", "letterbox", or "stretch"
 	timeSteps   int    // Detected from model output
 	numClasses  int    // Detected from model output
 }
@@ -37,7 +36,6 @@ func NewRecognizer(modelPath string, threads, optLevel int) (*Recognizer, error)
 		model:       model,
 		inputWidth:  160,
 		inputHeight: 48,
-		resizeMode:  "auto",
 		timeSteps:   20, // Default fallback
 		numClasses:  78, // Default fallback
 	}
@@ -56,8 +54,12 @@ func NewRecognizer(modelPath string, threads, optLevel int) (*Recognizer, error)
 // Recognize performs character recognition on a cropped plate image.
 // Returns the plate number string, per-character confidences, and overall confidence.
 func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, error) {
+	return r.RecognizeWithResizeMode(img, "auto")
+}
+
+func (r *Recognizer) RecognizeWithResizeMode(img image.Image, resizeMode string) (string, []float32, float32, error) {
 	// Stage 1: fast path for normal images.
-	plateNumber, charConfs, avgConf, err := r.recognizeSingleAngle(img, false)
+	plateNumber, charConfs, avgConf, err := r.recognizeSingleAngle(img, false, resizeMode)
 	if err != nil {
 		return "", nil, 0, err
 	}
@@ -84,7 +86,7 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 				if angle != 0 {
 					candImg = rotateImageGrayBG(cimg, angle)
 				}
-				pn, pc, cf, e := r.recognizeSingleAngle(candImg, true)
+				pn, pc, cf, e := r.recognizeSingleAngle(candImg, true, resizeMode)
 				if e != nil {
 					continue
 				}
@@ -290,9 +292,9 @@ type recognizeCandidateResult struct {
 	score float32
 }
 
-func (r *Recognizer) recognizeSingleAngle(img image.Image, useBeam bool) (string, []float32, float32, error) {
+func (r *Recognizer) recognizeSingleAngle(img image.Image, useBeam bool, resizeMode string) (string, []float32, float32, error) {
 	// Determine resize strategy
-	useLetterbox := r.shouldUseLetterbox(img)
+	useLetterbox := r.shouldUseLetterbox(img, resizeMode)
 	_ = useLetterbox // reserved for future use
 
 	tensor := r.preprocessPlate(img)
@@ -1070,8 +1072,8 @@ func (r *Recognizer) preprocessPlate(img image.Image) []float32 {
 // shouldUseLetterbox decides the resize strategy based on resizeMode and image aspect ratio.
 // In "auto" mode: if the input aspect ratio is within 10% of the model's target (3.33:1),
 // use stretch (faster, negligible distortion); otherwise use letterbox.
-func (r *Recognizer) shouldUseLetterbox(img image.Image) bool {
-	switch r.resizeMode {
+func (r *Recognizer) shouldUseLetterbox(img image.Image, resizeMode string) bool {
+	switch resizeMode {
 	case "stretch":
 		return false
 	case "letterbox":

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -18,6 +19,7 @@ type Model struct {
 	inputTensor  *ort.Tensor[float32]
 	outputTensor *ort.Tensor[float32]
 	outputShape  []int64
+	mu           sync.Mutex
 }
 
 // initONNXRuntime initializes the ONNX Runtime shared library.
@@ -127,6 +129,10 @@ func (m *Model) RunInference(inputData []float32) ([]float32, error) {
 	if m.session == nil {
 		return nil, fmt.Errorf("session is nil")
 	}
+	// AdvancedSession plus bound input/output tensors are shared per model.
+	// Guard the whole copy-run-copy sequence to avoid cross-request data races.
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	inData := m.inputTensor.GetData()
 	if len(inputData) > len(inData) {
