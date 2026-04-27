@@ -7,9 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"runtime"
 	"time"
 
 	"github.com/vesaa/platex/internal/engine"
+	"github.com/vesaa/platex/internal/systeminfo"
 	"github.com/vesaa/platex/internal/types"
 )
 
@@ -162,6 +164,11 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 // handleInfo handles GET /api/v1/info
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	rc := s.engine.GetRuntimeConfig()
+	features := systeminfo.CPUFeatureFlags()
+
 	info := map[string]interface{}{
 		"version": s.version,
 		"supported_plate_types": []string{
@@ -174,6 +181,24 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		},
 		"input_types": []string{"base64", "path", "url"},
 		"modes":       []string{"auto", "crop", "full"},
+		"runtime_config": rc,
+		"system": map[string]interface{}{
+			"os":         runtime.GOOS,
+			"arch":       runtime.GOARCH,
+			"num_cpu":    runtime.NumCPU(),
+			"gomaxprocs": runtime.GOMAXPROCS(0),
+			"cpu_features": map[string]bool{
+				"avx":      features["avx"],
+				"avx2":     features["avx2"],
+				"avx512f":  features["avx512f"],
+				"avx512bw": features["avx512bw"],
+			},
+			"process_memory_mb": map[string]float64{
+				"alloc":     float64(ms.Alloc) / 1024.0 / 1024.0,
+				"heap_inuse": float64(ms.HeapInuse) / 1024.0 / 1024.0,
+				"sys":       float64(ms.Sys) / 1024.0 / 1024.0,
+			},
+		},
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,6 +24,7 @@ import (
 	"github.com/vesaa/platex/internal/config"
 	"github.com/vesaa/platex/internal/engine"
 	"github.com/vesaa/platex/internal/modeldl"
+	"github.com/vesaa/platex/internal/systeminfo"
 )
 
 var (
@@ -107,12 +109,23 @@ func main() {
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
+		rc := eng.GetRuntimeConfig()
+		features := systeminfo.CPUFeatureFlags()
 		slog.Info("HTTP server listening", "address", addr)
 		fmt.Printf("\n  🚗 JSAI-LPR Server v%s\n", version)
 		fmt.Printf("  ├── Listening on: http://%s\n", addr)
 		fmt.Printf("  ├── API endpoint: http://%s/api/v1/recognize\n", addr)
 		fmt.Printf("  ├── Health check: http://%s/api/v1/health\n", addr)
-		fmt.Printf("  └── Workers: %d\n\n", cfg.Engine.Workers)
+		fmt.Printf("  ├── Workers: %v\n", rc["workers"])
+		fmt.Printf("  ├── Model Pool Size: %v\n", rc["model_pool_size"])
+		fmt.Printf("  ├── URL Fetch Concurrency: %v\n", rc["url_max_fetch_concurrency"])
+		fmt.Printf("  ├── ONNX Threads/Session: %v\n", rc["onnx_threads_per_session"])
+		fmt.Printf("  ├── CPU: cores=%d gomaxprocs=%d\n", runtime.NumCPU(), runtime.GOMAXPROCS(0))
+		fmt.Printf("  └── SIMD: AVX=%t AVX2=%t AVX512F=%t\n\n",
+			features["avx"],
+			features["avx2"],
+			features["avx512f"],
+		)
 
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("HTTP server error", "error", err)

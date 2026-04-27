@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/vesaa/platex/internal/types"
@@ -58,30 +59,46 @@ func (r *Recognizer) Recognize(img image.Image) (string, []float32, float32, err
 }
 
 func (r *Recognizer) RecognizeWithResizeMode(img image.Image, resizeMode string) (string, []float32, float32, error) {
+	start := time.Now()
 	// Stage 1: fast path for normal images.
+	stage1Start := time.Now()
 	plateNumber, charConfs, avgConf, err := r.recognizeSingleAngle(img, false, resizeMode)
 	if err != nil {
 		return "", nil, 0, err
 	}
+	stage1Ms := time.Since(stage1Start).Milliseconds()
 	if !needRecoverySearch(plateNumber, avgConf) {
 		slog.Info("Recognition result", "plate", plateNumber, "conf", avgConf, "steps", r.timeSteps, "classes", r.numClasses)
+		slog.Info("Recognition path summary",
+			"path", "fast",
+			"resize_mode", resizeMode,
+			"stage1_ms", stage1Ms,
+			"total_ms", time.Since(start).Milliseconds(),
+		)
 		return plateNumber, charConfs, avgConf, nil
 	}
 
 	// Stage 2: expensive candidate search only for abnormal outputs.
+	recoveryStart := time.Now()
 	best := recognizeCandidateResult{
 		plate: plateNumber,
 		confs: charConfs,
 		conf:  avgConf,
 		score: scorePlateCandidate(plateNumber, avgConf),
 	}
+	bestSrcIdx := -1
+	bestCropIdx := -1
+	bestAngle := 0.0
+	attemptCount := 0
+	successCount := 0
 	recoverySources := r.recoveryVariants(img)
 	angles := r.candidateAngles(img)
-	for _, srcImg := range recoverySources {
+	for srcIdx, srcImg := range recoverySources {
 		crops := r.candidateCrops(srcImg)
 		crops = append(crops, r.candidateCrops(upscaleImage(srcImg, 2))...)
-		for _, cimg := range crops {
+		for cropIdx, cimg := range crops {
 			for _, angle := range angles {
+				attemptCount++
 				candImg := cimg
 				if angle != 0 {
 					candImg = rotateImageGrayBG(cimg, angle)
@@ -90,6 +107,7 @@ func (r *Recognizer) RecognizeWithResizeMode(img image.Image, resizeMode string)
 				if e != nil {
 					continue
 				}
+				successCount++
 				score := scorePlateCandidate(pn, cf)
 				if score > best.score {
 					best = recognizeCandidateResult{
@@ -98,6 +116,9 @@ func (r *Recognizer) RecognizeWithResizeMode(img image.Image, resizeMode string)
 						conf:  cf,
 						score: score,
 					}
+					bestSrcIdx = srcIdx
+					bestCropIdx = cropIdx
+					bestAngle = angle
 					if isHighQualityCandidate(best.plate, best.score) {
 						goto RECOVERY_DONE
 					}
@@ -115,6 +136,21 @@ RECOVERY_DONE:
 	best.plate, best.confs, best.score = rerankAmbiguousPlate(best.plate, best.confs, best.score)
 
 	slog.Info("Recognition result", "plate", best.plate, "conf", best.conf, "steps", r.timeSteps, "classes", r.numClasses)
+	slog.Info("Recognition path summary",
+		"path", "recovery",
+		"resize_mode", resizeMode,
+		"stage1_ms", stage1Ms,
+		"recovery_ms", time.Since(recoveryStart).Milliseconds(),
+		"total_ms", time.Since(start).Milliseconds(),
+		"recovery_sources", len(recoverySources),
+		"recovery_crops", "dynamic",
+		"recovery_angles", len(angles),
+		"recovery_attempts", attemptCount,
+		"recovery_successes", successCount,
+		"best_src_idx", bestSrcIdx,
+		"best_crop_idx", bestCropIdx,
+		"best_angle", bestAngle,
+	)
 	return best.plate, best.confs, best.conf, nil
 }
 
@@ -987,9 +1023,9 @@ func ctcDecode(output []float32, timeSteps, numClasses int) (string, []float32, 
 			if maxIdx < len(plateChars) {
 				chars = append(chars, plateChars[maxIdx])
 				confs = append(confs, conf)
-				slog.Info("CTC token", "t", t, "idx", maxIdx, "char", plateChars[maxIdx], "conf", conf)
+				slog.Debug("CTC token", "t", t, "idx", maxIdx, "char", plateChars[maxIdx], "conf", conf)
 			} else {
-				slog.Info("CTC token ignored (index out of range)", "t", t, "idx", maxIdx, "conf", conf)
+				slog.Debug("CTC token ignored (index out of range)", "t", t, "idx", maxIdx, "conf", conf)
 			}
 		}
 		prevIdx = maxIdx

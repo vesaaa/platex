@@ -828,6 +828,18 @@ func (e *Engine) GetStats() *types.StatsData {
 	}
 }
 
+// GetRuntimeConfig returns key runtime config values for observability.
+func (e *Engine) GetRuntimeConfig() map[string]interface{} {
+	return map[string]interface{}{
+		"mode":                      e.config.Mode,
+		"workers":                   e.config.Workers,
+		"submit_timeout_ms":         e.config.SubmitTimeoutMs,
+		"onnx_threads_per_session":  e.config.ONNX.ThreadsPerSession,
+		"url_max_fetch_concurrency": e.config.URL.MaxFetchConcurrency,
+		"model_pool_size":           modelPoolSizeForInfo(),
+	}
+}
+
 // Close shuts down the engine and releases resources.
 func (e *Engine) Close() {
 	slog.Info("Shutting down LPR engine")
