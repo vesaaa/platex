@@ -394,15 +394,12 @@ func shouldUseCropByAspect(img image.Image) bool {
 func (e *Engine) retryCropWithTweaks(img image.Image, resizeMode string) *types.PlateResult {
 	// Keep retry path short and generic: each variant is cheap and broadly useful.
 	variants := []image.Image{
-		softenContrast(img),
 		unsharpMask(img),
 		adaptiveGrayBoost(img),
 		enhanceGrayContrast(img),
 		trimWhiteFrame(img),
 		upscaleImage(img, 2),
 	}
-	var best *types.PlateResult
-	bestScore := float32(-1e9)
 	for _, v := range variants {
 		plate, err := e.recognizeSingle(v, resizeMode)
 		if err != nil || plate == nil {
@@ -424,16 +421,9 @@ func (e *Engine) retryCropWithTweaks(img image.Image, resizeMode string) *types.
 				continue
 			}
 		}
-		score := scorePlateCandidate(plate.PlateNumber, plate.Confidence)
-		if plate.Type == types.PlateTypeUnknown {
-			score -= 6
-		}
-		if score > bestScore {
-			bestScore = score
-			best = plate
-		}
+		return plate
 	}
-	return best
+	return nil
 }
 
 // decodeInput converts an ImageInput to a Go image.Image.
