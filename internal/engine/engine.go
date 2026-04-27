@@ -22,6 +22,11 @@ import (
 	"github.com/vesaa/platex/internal/types"
 )
 
+const (
+	plateAspectRatioTarget    = 3.33
+	plateAspectRatioTolerance = 0.10
+)
+
 // Engine is the main license plate recognition engine.
 type Engine struct {
 	detector   *Detector
@@ -215,7 +220,7 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 
 	// Normalize mode
 	if mode == "" {
-		mode = "crop"
+		mode = "auto"
 	}
 
 	resizeMode := "auto"
@@ -242,7 +247,16 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 				return
 			}
 
-			if mode == "full" {
+			effectiveMode := mode
+			if mode == "auto" {
+				if shouldUseCropByAspect(img) {
+					effectiveMode = "crop"
+				} else {
+					effectiveMode = "full"
+				}
+			}
+
+			if effectiveMode == "full" {
 				plates, recErr := e.recognizeFull(img, opts, resizeMode, minConf)
 				if recErr != nil {
 					result.Error = recErr.Error()
@@ -341,6 +355,18 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 		results = append(results, *plate)
 	}
 	return results, nil
+}
+
+func shouldUseCropByAspect(img image.Image) bool {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w <= 0 || h <= 0 {
+		return false
+	}
+	ratio := float64(w) / float64(h)
+	minRatio := plateAspectRatioTarget * (1.0 - plateAspectRatioTolerance)
+	maxRatio := plateAspectRatioTarget * (1.0 + plateAspectRatioTolerance)
+	return ratio >= minRatio && ratio <= maxRatio
 }
 
 // decodeInput converts an ImageInput to a Go image.Image.
