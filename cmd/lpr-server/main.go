@@ -185,6 +185,10 @@ func applyEnvOverrides(cfg *config.Config) {
 		cfg.Engine.SubmitTimeoutMs = v
 		slog.Info("Applied env override", "key", "PLATEX_SUBMIT_TIMEOUT_MS", "value", v)
 	}
+	if v, ok := getEnvFloat32("PLATEX_FULL_EARLY_STOP_CONF"); ok && v > 0 {
+		cfg.Engine.Rec.FullEarlyStopConf = v
+		slog.Info("Applied env override", "key", "PLATEX_FULL_EARLY_STOP_CONF", "value", v)
+	}
 }
 
 func getEnvInt(key string) (int, bool) {
@@ -202,6 +206,23 @@ func getEnvInt(key string) (int, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+func getEnvFloat32(key string) (float32, bool) {
+	raw, ok := os.LookupEnv(key)
+	if !ok {
+		return 0, false
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(raw, 32)
+	if err != nil {
+		slog.Warn("Ignore invalid float env", "key", key, "value", raw, "error", err)
+		return 0, false
+	}
+	return float32(v), true
 }
 
 // setupLogging configures the slog default logger.

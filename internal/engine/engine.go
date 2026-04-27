@@ -47,10 +47,10 @@ type Engine struct {
 
 // recognizeJob represents a unit of work for the worker pool.
 type recognizeJob struct {
-	img      image.Image
+	img        image.Image
 	resizeMode string
-	resultCh chan *types.PlateResult
-	errCh    chan error
+	resultCh   chan *types.PlateResult
+	errCh      chan error
 }
 
 // New creates and initializes the recognition engine.
@@ -285,10 +285,10 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 
 			// Submit to worker pool (crop mode)
 			job := &recognizeJob{
-				img:      img,
+				img:        img,
 				resizeMode: resizeMode,
-				resultCh: make(chan *types.PlateResult, 1),
-				errCh:    make(chan error, 1),
+				resultCh:   make(chan *types.PlateResult, 1),
+				errCh:      make(chan error, 1),
 			}
 
 			submitTimeout := time.Duration(max(50, e.config.SubmitTimeoutMs)) * time.Millisecond
@@ -345,13 +345,14 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 		return nil, fmt.Errorf("detector model not loaded")
 	}
 	tryDirect := shouldTryDirectPlateInFull(img)
+	directEarlyStopConf := resolveFullEarlyStopConf(e.config.Rec.FullEarlyStopConf, opts)
 	var direct *types.PlateResult
 	if tryDirect {
 		// Fast short-circuit for plate-like inputs in full mode:
 		// if direct whole-image OCR is high quality, skip detector path.
 		if plate, recErr := e.recognizeSingle(img, resizeMode); recErr == nil && plate != nil {
 			direct = plate
-			if isHighQualityFullDirect(*plate) {
+			if isHighQualityFullDirect(*plate, directEarlyStopConf) {
 				return []types.PlateResult{*plate}, nil
 			}
 		}
@@ -454,11 +455,11 @@ func shouldTryDirectPlateInFull(img image.Image) bool {
 	return true
 }
 
-func isHighQualityFullDirect(p types.PlateResult) bool {
+func isHighQualityFullDirect(p types.PlateResult, minConf float32) bool {
 	if p.Type == types.PlateTypeUnknown {
 		return false
 	}
-	if p.Confidence < 0.84 {
+	if p.Confidence < minConf {
 		return false
 	}
 	r := []rune(strings.TrimSpace(p.PlateNumber))
@@ -466,6 +467,23 @@ func isHighQualityFullDirect(p types.PlateResult) bool {
 		return false
 	}
 	return looksLikeMainlandPlatePrefix(r)
+}
+
+func resolveFullEarlyStopConf(defaultConf float32, opts *types.RecognizeOption) float32 {
+	conf := defaultConf
+	if conf <= 0 {
+		conf = 0.65
+	}
+	if opts != nil && opts.FullEarlyStopConf > 0 {
+		conf = opts.FullEarlyStopConf
+	}
+	if conf < 0.50 {
+		conf = 0.50
+	}
+	if conf > 0.99 {
+		conf = 0.99
+	}
+	return conf
 }
 
 // If direct candidate and detector candidate only differ on D/0 in NEV marker slot,
@@ -836,6 +854,7 @@ func (e *Engine) GetRuntimeConfig() map[string]interface{} {
 		"submit_timeout_ms":         e.config.SubmitTimeoutMs,
 		"onnx_threads_per_session":  e.config.ONNX.ThreadsPerSession,
 		"url_max_fetch_concurrency": e.config.URL.MaxFetchConcurrency,
+		"full_early_stop_conf":      e.config.Rec.FullEarlyStopConf,
 		"model_pool_size":           modelPoolSizeForInfo(),
 	}
 }

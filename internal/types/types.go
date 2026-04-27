@@ -42,7 +42,7 @@ type PlateType string
 
 const (
 	PlateTypeStandard7 PlateType = "standard_7" // 标准7位
-	PlateTypeNewEnergy PlateType = "new_energy"  // 新能源8位
+	PlateTypeNewEnergy PlateType = "new_energy" // 新能源8位
 	PlateTypeUnknown   PlateType = "unknown"
 )
 
@@ -79,23 +79,24 @@ type ImageInput struct {
 
 // RecognizeOption represents optional parameters.
 type RecognizeOption struct {
-	MaxPlates     int     `json:"max_plates,omitempty"`
-	MinConfidence float32 `json:"min_confidence,omitempty"`
-	ResizeMode    string  `json:"resize_mode,omitempty"` // "letterbox" (default) or "stretch"
+	MaxPlates         int     `json:"max_plates,omitempty"`
+	MinConfidence     float32 `json:"min_confidence,omitempty"`
+	ResizeMode        string  `json:"resize_mode,omitempty"`          // "letterbox" (default) or "stretch"
+	FullEarlyStopConf float32 `json:"full_early_stop_conf,omitempty"` // full模式直识别命中即停阈值
 }
 
 // RecognizeResponse represents the HTTP response body.
 type RecognizeResponse struct {
-	Code    int              `json:"code"`
-	Message string           `json:"message"`
-	Data    *RecognizeData   `json:"data,omitempty"`
+	Code    int            `json:"code"`
+	Message string         `json:"message"`
+	Data    *RecognizeData `json:"data,omitempty"`
 }
 
 // RecognizeData contains the recognition results.
 type RecognizeData struct {
-	Results       []ImageResult `json:"results"`
-	TotalElapsedMs int64        `json:"total_elapsed_ms"`
-	Mode          string        `json:"mode"`
+	Results        []ImageResult `json:"results"`
+	TotalElapsedMs int64         `json:"total_elapsed_ms"`
+	Mode           string        `json:"mode"`
 }
 
 // HealthResponse represents the health check response.
@@ -123,10 +124,10 @@ type StatsResponse struct {
 
 // StatsData contains runtime statistics.
 type StatsData struct {
-	TotalRequests    int64   `json:"total_requests"`
-	TotalImages      int64   `json:"total_images"`
-	TotalPlates      int64   `json:"total_plates"`
-	AvgLatencyMs     float64 `json:"avg_latency_ms"`
-	SuccessRate      float64 `json:"success_rate"`
-	CurrentQPS       float64 `json:"current_qps"`
+	TotalRequests int64   `json:"total_requests"`
+	TotalImages   int64   `json:"total_images"`
+	TotalPlates   int64   `json:"total_plates"`
+	AvgLatencyMs  float64 `json:"avg_latency_ms"`
+	SuccessRate   float64 `json:"success_rate"`
+	CurrentQPS    float64 `json:"current_qps"`
 }

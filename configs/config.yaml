@@ -34,6 +34,8 @@ engine:
     max_plates: 10
     # full 模式默认最多识别的候选框数量（可被请求 options.max_plates 覆盖）
     full_max_plates: 3
+    # full 模式对疑似小图执行“直识别命中即停”的阈值
+    full_early_stop_conf: 0.65
 
   detection:
     # full 模式检测置信度阈值，越低召回越高但误检可能增加

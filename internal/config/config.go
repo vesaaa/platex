@@ -27,14 +27,14 @@ type ServerConfig struct {
 
 // EngineConfig holds inference engine settings.
 type EngineConfig struct {
-	Mode      string          `yaml:"mode"`    // "auto", "crop" or "full"
-	Workers   int             `yaml:"workers"` // 0 = auto
-	SubmitTimeoutMs int       `yaml:"submit_timeout_ms"`
-	Models    ModelsConfig    `yaml:"models"`
-	ONNX      ONNXConfig      `yaml:"onnx"`
-	Rec       RecConfig       `yaml:"recognition"`
-	Detection DetectionConfig `yaml:"detection"`
-	URL       URLConfig       `yaml:"url"`
+	Mode            string          `yaml:"mode"`    // "auto", "crop" or "full"
+	Workers         int             `yaml:"workers"` // 0 = auto
+	SubmitTimeoutMs int             `yaml:"submit_timeout_ms"`
+	Models          ModelsConfig    `yaml:"models"`
+	ONNX            ONNXConfig      `yaml:"onnx"`
+	Rec             RecConfig       `yaml:"recognition"`
+	Detection       DetectionConfig `yaml:"detection"`
+	URL             URLConfig       `yaml:"url"`
 }
 
 // ModelsConfig holds model file paths.
@@ -52,9 +52,10 @@ type ONNXConfig struct {
 
 // RecConfig holds recognition parameters.
 type RecConfig struct {
-	MinConfidence float32 `yaml:"min_confidence"`
-	MaxPlates     int     `yaml:"max_plates"`
-	FullMaxPlates int     `yaml:"full_max_plates"`
+	MinConfidence     float32 `yaml:"min_confidence"`
+	MaxPlates         int     `yaml:"max_plates"`
+	FullMaxPlates     int     `yaml:"full_max_plates"`
+	FullEarlyStopConf float32 `yaml:"full_early_stop_conf"`
 }
 
 // DetectionConfig holds full-mode detector postprocess thresholds.
@@ -66,15 +67,15 @@ type DetectionConfig struct {
 
 // URLConfig holds settings for URL image input fetching.
 type URLConfig struct {
-	Enabled             bool   `yaml:"enabled"`
-	FetchTimeoutMs      int    `yaml:"fetch_timeout_ms"`
-	MaxImageBytes       int64  `yaml:"max_image_bytes"`
-	MaxFetchConcurrency int    `yaml:"max_fetch_concurrency"`
-	MaxFetchRetries     int    `yaml:"max_fetch_retries"`
-	RetryBackoffMs      int    `yaml:"retry_backoff_ms"`
-	MaxIdleConns        int    `yaml:"max_idle_conns"`
-	MaxIdleConnsPerHost int    `yaml:"max_idle_conns_per_host"`
-	BlockPrivateIP      bool   `yaml:"block_private_ip"`
+	Enabled             bool     `yaml:"enabled"`
+	FetchTimeoutMs      int      `yaml:"fetch_timeout_ms"`
+	MaxImageBytes       int64    `yaml:"max_image_bytes"`
+	MaxFetchConcurrency int      `yaml:"max_fetch_concurrency"`
+	MaxFetchRetries     int      `yaml:"max_fetch_retries"`
+	RetryBackoffMs      int      `yaml:"retry_backoff_ms"`
+	MaxIdleConns        int      `yaml:"max_idle_conns"`
+	MaxIdleConnsPerHost int      `yaml:"max_idle_conns_per_host"`
+	BlockPrivateIP      bool     `yaml:"block_private_ip"`
 	AllowedSchemes      []string `yaml:"allowed_schemes"`
 }
 
@@ -100,8 +101,8 @@ func DefaultConfig() *Config {
 			MaxRequestBody: "100MB",
 		},
 		Engine: EngineConfig{
-			Mode:    "auto",
-			Workers: workers,
+			Mode:            "auto",
+			Workers:         workers,
 			SubmitTimeoutMs: 300,
 			Models: ModelsConfig{
 				Recognizer: "models/plate_rec.onnx",
@@ -113,9 +114,10 @@ func DefaultConfig() *Config {
 				OptimizationLevel: 3,
 			},
 			Rec: RecConfig{
-				MinConfidence: 0.6,
-				MaxPlates:     10,
-				FullMaxPlates: 3,
+				MinConfidence:     0.6,
+				MaxPlates:         10,
+				FullMaxPlates:     3,
+				FullEarlyStopConf: 0.65,
 			},
 			Detection: DetectionConfig{
 				ConfThreshold: 0.30,
