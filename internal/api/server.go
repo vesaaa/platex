@@ -114,7 +114,7 @@ func (s *Server) handleRecognize(w http.ResponseWriter, r *http.Request) {
 	// Set default mode
 	mode := req.Mode
 	if mode == "" {
-		mode = "crop"
+		mode = "auto"
 	}
 
 	start := time.Now()
@@ -173,7 +173,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 			6: "红色", 7: "橙色", 8: "紫色", 9: "灰色", 10: "银色", 11: "棕色", 12: "粉色",
 		},
 		"input_types": []string{"base64", "path", "url"},
-		"modes":       []string{"crop", "full"},
+		"modes":       []string{"auto", "crop", "full"},
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

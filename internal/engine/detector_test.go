@@ -6,38 +6,54 @@ import (
 	"github.com/vesaa/platex/internal/types"
 )
 
-func TestResolveMaxPlates(t *testing.T) {
+func TestResolveMaxPlatesByMode(t *testing.T) {
 	tests := []struct {
-		name       string
-		defaultMax int
-		opts       *types.RecognizeOption
-		want       int
+		name           string
+		defaultMax     int
+		defaultFullMax int
+		mode           string
+		opts           *types.RecognizeOption
+		want           int
 	}{
 		{
-			name:       "use default",
-			defaultMax: 8,
-			opts:       nil,
-			want:       8,
+			name:           "use crop default",
+			defaultMax:     8,
+			defaultFullMax: 3,
+			mode:           "crop",
+			opts:           nil,
+			want:           8,
 		},
 		{
-			name:       "override by opts",
-			defaultMax: 8,
-			opts:       &types.RecognizeOption{MaxPlates: 3},
-			want:       3,
+			name:           "use full default",
+			defaultMax:     8,
+			defaultFullMax: 3,
+			mode:           "full",
+			opts:           nil,
+			want:           3,
 		},
 		{
-			name:       "fallback when invalid default",
-			defaultMax: 0,
-			opts:       nil,
-			want:       10,
+			name:           "override by opts",
+			defaultMax:     8,
+			defaultFullMax: 3,
+			mode:           "full",
+			opts:           &types.RecognizeOption{MaxPlates: 5},
+			want:           5,
+		},
+		{
+			name:           "fallback when invalid default",
+			defaultMax:     0,
+			defaultFullMax: 0,
+			mode:           "crop",
+			opts:           nil,
+			want:           10,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveMaxPlates(tc.defaultMax, tc.opts)
+			got := resolveMaxPlatesByMode(tc.defaultMax, tc.defaultFullMax, tc.mode, tc.opts)
 			if got != tc.want {
-				t.Fatalf("resolveMaxPlates()=%d, want=%d", got, tc.want)
+				t.Fatalf("resolveMaxPlatesByMode()=%d, want=%d", got, tc.want)
 			}
 		})
 	}

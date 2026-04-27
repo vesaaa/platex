@@ -22,6 +22,11 @@ import (
 	"github.com/vesaa/platex/internal/types"
 )
 
+const (
+	plateAspectRatioTarget    = 3.33
+	plateAspectRatioTolerance = 0.10
+)
+
 // Engine is the main license plate recognition engine.
 type Engine struct {
 	detector   *Detector
@@ -197,7 +202,7 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 
 	// Normalize mode
 	if mode == "" {
-		mode = "crop"
+		mode = "auto"
 	}
 
 	// Set resize mode: default to auto
@@ -228,7 +233,16 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 				return
 			}
 
-			if mode == "full" {
+			effectiveMode := mode
+			if mode == "auto" {
+				if shouldUseCropByAspect(img) {
+					effectiveMode = "crop"
+				} else {
+					effectiveMode = "full"
+				}
+			}
+
+			if effectiveMode == "full" {
 				plates, recErr := e.recognizeFull(img, opts)
 				if recErr != nil {
 					result.Error = recErr.Error()
@@ -301,21 +315,59 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption) ([]
 		return []types.PlateResult{}, nil
 	}
 
-	maxPlates := resolveMaxPlates(e.config.Rec.MaxPlates, opts)
-	if len(boxes) > maxPlates {
-		boxes = boxes[:maxPlates]
+	maxPlates := resolveMaxPlatesByMode(e.config.Rec.MaxPlates, e.config.Rec.FullMaxPlates, "full", opts)
+	filtered := make([][4]int, 0, len(boxes))
+	for _, b := range boxes {
+		if isLikelyPlateBox(img.Bounds(), b) {
+			filtered = append(filtered, b)
+		}
+	}
+	if len(filtered) == 0 {
+		filtered = boxes
+	}
+	if len(filtered) > maxPlates {
+		filtered = filtered[:maxPlates]
 	}
 
-	results := make([]types.PlateResult, 0, len(boxes))
-	for _, b := range boxes {
-		crop := cropImage(img, b[0], b[1], b[2], b[3])
-		plate, recErr := e.recognizeSingle(crop)
-		if recErr != nil || plate == nil {
-			continue
+	workers := max(1, min(e.config.Workers, len(filtered)))
+	sem := make(chan struct{}, workers)
+	ordered := make([]*types.PlateResult, len(filtered))
+	var wg sync.WaitGroup
+	for i, b := range filtered {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, box [4]int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			crop := cropImage(img, box[0], box[1], box[2], box[3])
+			plate, recErr := e.recognizeSingle(crop)
+			if recErr != nil || plate == nil {
+				return
+			}
+			ordered[idx] = plate
+		}(i, b)
+	}
+	wg.Wait()
+
+	results := make([]types.PlateResult, 0, len(filtered))
+	for _, plate := range ordered {
+		if plate != nil {
+			results = append(results, *plate)
 		}
-		results = append(results, *plate)
 	}
 	return results, nil
+}
+
+func shouldUseCropByAspect(img image.Image) bool {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w <= 0 || h <= 0 {
+		return false
+	}
+	ratio := float64(w) / float64(h)
+	minRatio := plateAspectRatioTarget * (1.0 - plateAspectRatioTolerance)
+	maxRatio := plateAspectRatioTarget * (1.0 + plateAspectRatioTolerance)
+	return ratio >= minRatio && ratio <= maxRatio
 }
 
 // decodeInput converts an ImageInput to a Go image.Image.
@@ -479,8 +531,11 @@ func isPrivateOrLocalIP(ip net.IP) bool {
 	return false
 }
 
-func resolveMaxPlates(defaultMax int, opts *types.RecognizeOption) int {
+func resolveMaxPlatesByMode(defaultMax, defaultFullMax int, mode string, opts *types.RecognizeOption) int {
 	maxPlates := defaultMax
+	if mode == "full" && defaultFullMax > 0 {
+		maxPlates = defaultFullMax
+	}
 	if opts != nil && opts.MaxPlates > 0 {
 		maxPlates = opts.MaxPlates
 	}
@@ -488,6 +543,25 @@ func resolveMaxPlates(defaultMax int, opts *types.RecognizeOption) int {
 		return 10
 	}
 	return maxPlates
+}
+
+func isLikelyPlateBox(bounds image.Rectangle, box [4]int) bool {
+	bw := box[2] - box[0]
+	bh := box[3] - box[1]
+	if bw < 8 || bh < 8 {
+		return false
+	}
+	ratio := float64(bw) / float64(bh)
+	if ratio < 1.6 || ratio > 6.5 {
+		return false
+	}
+	imgArea := float64(bounds.Dx() * bounds.Dy())
+	boxArea := float64(bw * bh)
+	if imgArea <= 0 {
+		return false
+	}
+	areaRatio := boxArea / imgArea
+	return areaRatio >= 0.003 && areaRatio <= 0.60
 }
 
 func shouldRetryStatusError(err error) bool {
