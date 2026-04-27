@@ -888,6 +888,18 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 		confs = confs[:7]
 	}
 
+	// Soft correction 5:
+	// Some difficult crops occasionally produce 9 chars where a valid 8-char
+	// new-energy plate is followed by one noisy low-confidence tail char.
+	// Example pattern: 湘AF555641 -> 湘AF55564
+	if len(r) == 9 &&
+		len(confs) == 9 &&
+		looksLikeNewEnergyPlate(r[:8]) &&
+		confs[8] < 0.72 {
+		r = r[:8]
+		confs = confs[:8]
+	}
+
 	return string(r), confs
 }
 

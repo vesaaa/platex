@@ -66,4 +66,15 @@ func TestClassifyPlateType_StrictNewEnergyPattern(t *testing.T) {
 	}
 }
 
+func TestNormalizePlateNumberWithConfidence_TrimNinthNoiseForNEV(t *testing.T) {
+	in := "湘AF555641"
+	want := "湘AF55564"
+	confs := []float32{0.98, 0.97, 0.96, 0.95, 0.94, 0.94, 0.93, 0.92, 0.58}
+	got, _ := normalizePlateNumberWithConfidence(in, confs)
+	if got != want {
+		t.Fatalf("normalizePlateNumberWithConfidence(%q)=%q, want=%q", in, got, want)
+	}
+}
+
+
 
