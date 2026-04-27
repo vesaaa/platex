@@ -11,10 +11,17 @@ import (
 )
 
 // DefaultModelURLs points to project release assets for model files.
-var DefaultModelURLs = map[string]string{
-	"plate_rec.onnx":    "https://github.com/vesaaa/platex/releases/download/v1.0.0-models/plate_rec.onnx",
-	"plate_detect.onnx": "https://github.com/vesaaa/platex/releases/download/v1.0.0-models/plate_detect.onnx",
-	"plate_color.onnx":  "https://github.com/vesaaa/platex/releases/download/v1.0.0-models/plate_color.onnx",
+// URLs are tried in order for each model.
+var DefaultModelURLs = map[string][]string{
+	"plate_rec.onnx": {
+		"https://github.com/vesaaa/platex/releases/download/v1.0.0-models/plate_rec.onnx",
+	},
+	"plate_detect.onnx": {
+		"https://github.com/vesaaa/platex/releases/download/v1.0.0-models/plate_detect.onnx",
+	},
+	"plate_color.onnx": {
+		"https://github.com/vesaaa/platex/releases/download/v1.0.0-models/plate_color.onnx",
+	},
 }
 
 // DownloadModels downloads required model files directly from release URLs.
@@ -25,16 +32,25 @@ func DownloadModels(modelsDir string) error {
 
 	client := &http.Client{Timeout: 5 * time.Minute}
 
-	for targetName, modelURL := range DefaultModelURLs {
+	for targetName, modelURLs := range DefaultModelURLs {
 		targetPath := filepath.Join(modelsDir, targetName)
 		if _, err := os.Stat(targetPath); err == nil {
 			slog.Info("Model already exists. Skip downloading.", "model", targetName)
 			continue
 		}
 
-		slog.Info("Downloading model file...", "model", targetName, "url", modelURL)
-		if err := downloadToFile(client, modelURL, targetPath); err != nil {
-			return fmt.Errorf("download %s: %w", targetName, err)
+		var lastErr error
+		for _, modelURL := range modelURLs {
+			slog.Info("Downloading model file...", "model", targetName, "url", modelURL)
+			if err := downloadToFile(client, modelURL, targetPath); err == nil {
+				lastErr = nil
+				break
+			} else {
+				lastErr = err
+			}
+		}
+		if lastErr != nil {
+			return fmt.Errorf("download %s: %w", targetName, lastErr)
 		}
 	}
 
