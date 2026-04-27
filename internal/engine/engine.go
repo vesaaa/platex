@@ -332,7 +332,13 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 	if err != nil {
 		return nil, fmt.Errorf("detect: %w", err)
 	}
+	tryDirect := shouldTryDirectPlateInFull(img)
 	if len(boxes) == 0 {
+		if tryDirect {
+			if plate, recErr := e.recognizeSingle(img, resizeMode); recErr == nil && plate != nil {
+				return []types.PlateResult{*plate}, nil
+			}
+		}
 		return []types.PlateResult{}, nil
 	}
 
@@ -376,7 +382,45 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 			results = append(results, *plate)
 		}
 	}
+
+	// For plate-like inputs sent with mode=full (already cropped or near-cropped),
+	// include a direct full-image recognition candidate and pick the best one.
+	if tryDirect {
+		if plate, recErr := e.recognizeSingle(img, resizeMode); recErr == nil && plate != nil {
+			results = append(results, *plate)
+		}
+		if len(results) > 1 {
+			bestIdx := 0
+			bestScore := scorePlateCandidate(results[0].PlateNumber, results[0].Confidence)
+			for i := 1; i < len(results); i++ {
+				s := scorePlateCandidate(results[i].PlateNumber, results[i].Confidence)
+				if s > bestScore {
+					bestScore = s
+					bestIdx = i
+				}
+			}
+			return []types.PlateResult{results[bestIdx]}, nil
+		}
+	}
 	return results, nil
+}
+
+func shouldTryDirectPlateInFull(img image.Image) bool {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w <= 0 || h <= 0 {
+		return false
+	}
+	ratio := float64(w) / float64(h)
+	// Heuristic for pre-cropped/near-cropped plate images:
+	// moderate pixel size with plate-like wide aspect.
+	if ratio < 2.0 || ratio > 5.2 {
+		return false
+	}
+	if w > 1280 || h > 512 {
+		return false
+	}
+	return true
 }
 
 func shouldUseCropByAspect(img image.Image) bool {
