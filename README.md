@@ -72,7 +72,7 @@ docker run -d -p 8080:8080 ghcr.io/vesaaa/platex:v0.5.1
 # 健康检查
 curl http://localhost:8080/api/v1/health
 
-# 车牌识别 (Base64, 不传 mode 时自动路由)
+# 车牌识别 (Base64, 不传 mode 默认 crop)
 curl -X POST http://localhost:8080/api/v1/recognize \
   -H "Content-Type: application/json" \
   -d '{
@@ -83,7 +83,7 @@ curl -X POST http://localhost:8080/api/v1/recognize \
         "data": "<base64_encoded_image>"
       }
     ],
-    "mode": "auto"
+    "mode": "crop"
   }'
 
 # 车牌识别 (文件路径, 指定 letterbox 缩放)
@@ -139,7 +139,7 @@ curl -X POST http://localhost:8080/api/v1/recognize \
     {"id": "img_002", "type": "path", "data": "/path/to/image.jpg"},
     {"id": "img_003", "type": "url", "data": "https://example.com/car.jpg"}
   ],
-  "mode": "auto",
+  "mode": "crop",
   "options": {
     "min_confidence": 0.6,
     "resize_mode": "auto"
@@ -165,9 +165,9 @@ curl -X POST http://localhost:8080/api/v1/recognize \
 - `engine.detection.iou_threshold`: NMS IoU 阈值（默认 `0.45`）
 - `engine.detection.max_candidates`: NMS 后最多保留候选框数量（默认 `50`）
 
-识别路由说明（`mode=auto`，默认）：
-- 输入图宽高比在 `3.33 ±10%`（约 `3.0 ~ 3.66`）范围内，自动按 `crop` 流程识别（更快）
-- 不在该范围内，自动按 `full` 流程识别（先检测再识别）
+识别路由说明：
+- 不传 `mode` 时默认按 `crop` 识别（高吞吐路径）
+- 显式传 `mode=full` 时才走大图检测+识别流程
 
 `engine.recognition.full_max_plates`（默认 `3`）用于限制 full 模式默认识别候选框数量，可显著影响 full 吞吐；
 如需更高召回可调大，若追求 QPS 建议保持 `2~4`。

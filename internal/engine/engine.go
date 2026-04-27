@@ -22,11 +22,6 @@ import (
 	"github.com/vesaa/platex/internal/types"
 )
 
-const (
-	plateAspectRatioTarget    = 3.33
-	plateAspectRatioTolerance = 0.10
-)
-
 // Engine is the main license plate recognition engine.
 type Engine struct {
 	detector   *Detector
@@ -219,8 +214,8 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 	}
 
 	// Normalize mode
-	if mode == "" {
-		mode = "auto"
+	if mode == "" || mode == "auto" {
+		mode = "crop"
 	}
 
 	resizeMode := "auto"
@@ -247,16 +242,7 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 				return
 			}
 
-			effectiveMode := mode
-			if mode == "auto" {
-				if shouldUseCropByAspect(img) {
-					effectiveMode = "crop"
-				} else {
-					effectiveMode = "full"
-				}
-			}
-
-			if effectiveMode == "full" {
+			if mode == "full" {
 				plates, recErr := e.recognizeFull(img, opts, resizeMode, minConf)
 				if recErr != nil {
 					result.Error = recErr.Error()
@@ -310,6 +296,21 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 				}
 			}
 
+			if shouldFallbackToFull(mode, result) {
+				plates, recErr := e.recognizeFull(img, opts, resizeMode, minConf)
+				if recErr != nil {
+					// Keep crop result on fallback failure to avoid turning success into error.
+					slog.Warn("fallback full recognition failed",
+						"id", inp.ID,
+						"error", recErr,
+					)
+				} else {
+					filtered := filterReliablePlates(plates)
+					e.totalPlates.Add(int64(len(filtered) - len(result.Plates)))
+					result.Plates = filtered
+				}
+			}
+
 			result.ElapsedMs = time.Since(imgStart).Milliseconds()
 			e.totalImages.Add(1)
 			e.totalTimeMs.Add(result.ElapsedMs)
@@ -355,18 +356,6 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 		results = append(results, *plate)
 	}
 	return results, nil
-}
-
-func shouldUseCropByAspect(img image.Image) bool {
-	b := img.Bounds()
-	w, h := b.Dx(), b.Dy()
-	if w <= 0 || h <= 0 {
-		return false
-	}
-	ratio := float64(w) / float64(h)
-	minRatio := plateAspectRatioTarget * (1.0 - plateAspectRatioTolerance)
-	maxRatio := plateAspectRatioTarget * (1.0 + plateAspectRatioTolerance)
-	return ratio >= minRatio && ratio <= maxRatio
 }
 
 // decodeInput converts an ImageInput to a Go image.Image.
@@ -539,6 +528,36 @@ func resolveMaxPlates(defaultMax int, opts *types.RecognizeOption) int {
 		return 10
 	}
 	return maxPlates
+}
+
+func shouldFallbackToFull(mode string, result types.ImageResult) bool {
+	if mode != "crop" {
+		return false
+	}
+	if result.Error != "" {
+		return false
+	}
+	if len(result.Plates) == 0 {
+		return true
+	}
+	if len(result.Plates) == 1 && result.Plates[0].Type == types.PlateTypeUnknown {
+		return true
+	}
+	return false
+}
+
+func filterReliablePlates(plates []types.PlateResult) []types.PlateResult {
+	if len(plates) == 0 {
+		return []types.PlateResult{}
+	}
+	filtered := make([]types.PlateResult, 0, len(plates))
+	for _, p := range plates {
+		if p.Type == types.PlateTypeUnknown {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	return filtered
 }
 
 func shouldRetryStatusError(err error) bool {
