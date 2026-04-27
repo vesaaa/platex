@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/vesaa/platex/internal/config"
 	"github.com/vesaa/platex/internal/types"
@@ -188,6 +189,21 @@ func (e *Engine) recognizeSingle(img image.Image, resizeMode string) (*types.Pla
 		)
 		colorCode = int(types.ColorBlue)
 	}
+	// For standard-7, yellow predictions on blue plates are also common under
+	// low-light/warm-light conditions. Only correct when model confidence is low
+	// and image evidence strongly favors blue over yellow.
+	if plateType == types.PlateTypeStandard7 &&
+		colorCode == int(types.ColorYellow) &&
+		colorConf < 0.90 &&
+		hasBlueDominanceOverYellow(img) {
+		slog.Info("Color corrected for standard-7 blue/yellow ambiguity",
+			"plate", plateNumber,
+			"from", colorCode,
+			"to", int(types.ColorBlue),
+			"color_conf", colorConf,
+		)
+		colorCode = int(types.ColorBlue)
+	}
 
 	colorName := "其他"
 	if name, ok := types.ColorNames[types.PlateColor(colorCode)]; ok {
@@ -328,16 +344,26 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 	if e.detector == nil {
 		return nil, fmt.Errorf("detector model not loaded")
 	}
+	tryDirect := shouldTryDirectPlateInFull(img)
+	var direct *types.PlateResult
+	if tryDirect {
+		// Fast short-circuit for plate-like inputs in full mode:
+		// if direct whole-image OCR is high quality, skip detector path.
+		if plate, recErr := e.recognizeSingle(img, resizeMode); recErr == nil && plate != nil {
+			direct = plate
+			if isHighQualityFullDirect(*plate) {
+				return []types.PlateResult{*plate}, nil
+			}
+		}
+	}
+
 	boxes, err := e.detector.Detect(img)
 	if err != nil {
 		return nil, fmt.Errorf("detect: %w", err)
 	}
-	tryDirect := shouldTryDirectPlateInFull(img)
 	if len(boxes) == 0 {
-		if tryDirect {
-			if plate, recErr := e.recognizeSingle(img, resizeMode); recErr == nil && plate != nil {
-				return []types.PlateResult{*plate}, nil
-			}
+		if direct != nil {
+			return []types.PlateResult{*direct}, nil
 		}
 		return []types.PlateResult{}, nil
 	}
@@ -386,10 +412,15 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 	// For plate-like inputs sent with mode=full (already cropped or near-cropped),
 	// include a direct full-image recognition candidate and pick the best one.
 	if tryDirect {
-		if plate, recErr := e.recognizeSingle(img, resizeMode); recErr == nil && plate != nil {
-			results = append(results, *plate)
+		if direct != nil {
+			results = append(results, *direct)
 		}
 		if len(results) > 1 {
+			if direct != nil {
+				if preferred := preferNewEnergyDOverZero(results, *direct); preferred != nil {
+					return []types.PlateResult{*preferred}, nil
+				}
+			}
 			bestIdx := 0
 			bestScore := scorePlateCandidate(results[0].PlateNumber, results[0].Confidence)
 			for i := 1; i < len(results); i++ {
@@ -413,12 +444,75 @@ func shouldTryDirectPlateInFull(img image.Image) bool {
 	}
 	ratio := float64(w) / float64(h)
 	// Heuristic for pre-cropped/near-cropped plate images:
-	// moderate pixel size with plate-like wide aspect.
-	if ratio < 2.0 || ratio > 5.2 {
+	// moderate pixel size with plate-like or near-square aspect.
+	if ratio < 0.8 || ratio > 5.2 {
 		return false
 	}
 	if w > 1280 || h > 512 {
 		return false
+	}
+	return true
+}
+
+func isHighQualityFullDirect(p types.PlateResult) bool {
+	if p.Type == types.PlateTypeUnknown {
+		return false
+	}
+	if p.Confidence < 0.84 {
+		return false
+	}
+	r := []rune(strings.TrimSpace(p.PlateNumber))
+	if len(r) != 7 && len(r) != 8 {
+		return false
+	}
+	return looksLikeMainlandPlatePrefix(r)
+}
+
+// If direct candidate and detector candidate only differ on D/0 in NEV marker slot,
+// prefer the D variant to reduce common D->0 confusion.
+func preferNewEnergyDOverZero(cands []types.PlateResult, direct types.PlateResult) *types.PlateResult {
+	directRunes := []rune(strings.TrimSpace(direct.PlateNumber))
+	if len(directRunes) != 8 || !looksLikeMainlandPlatePrefix(directRunes) {
+		return nil
+	}
+	if unicode.ToUpper(directRunes[2]) != 'D' {
+		return nil
+	}
+	for i := range cands {
+		r := []rune(strings.TrimSpace(cands[i].PlateNumber))
+		if len(r) != 8 || !looksLikeMainlandPlatePrefix(r) {
+			continue
+		}
+		if unicode.ToUpper(r[2]) != 'D' {
+			continue
+		}
+		// Compare only D/0 ambiguity at index 3, all others must match.
+		if !sameExceptIndex(r, directRunes, 3) {
+			continue
+		}
+		a := unicode.ToUpper(r[3])
+		b := unicode.ToUpper(directRunes[3])
+		if (a == '0' && b == 'D') || (a == 'D' && b == '0') {
+			if b == 'D' {
+				return &direct
+			}
+			return &cands[i]
+		}
+	}
+	return nil
+}
+
+func sameExceptIndex(a, b []rune, except int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		if i == except {
+			continue
+		}
+		if unicode.ToUpper(a[i]) != unicode.ToUpper(b[i]) {
+			return false
+		}
 	}
 	return true
 }
@@ -670,6 +764,50 @@ func shouldRetryStatusError(err error) bool {
 		return true
 	}
 	return code >= 500 && code <= 599
+}
+
+func hasBlueDominanceOverYellow(img image.Image) bool {
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return false
+	}
+
+	// Focus center region to reduce border/background interference.
+	marginX := w / 8
+	marginY := h / 6
+	x0, x1 := bounds.Min.X+marginX, bounds.Max.X-marginX
+	y0, y1 := bounds.Min.Y+marginY, bounds.Max.Y-marginY
+	if x1 <= x0 || y1 <= y0 {
+		x0, x1 = bounds.Min.X, bounds.Max.X
+		y0, y1 = bounds.Min.Y, bounds.Max.Y
+	}
+
+	var blueCount, yellowCount, valid int
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			r16, g16, b16, _ := img.At(x, y).RGBA()
+			r, g, b := float64(r16>>8), float64(g16>>8), float64(b16>>8)
+			hue, sat, val := rgbToHSV(r, g, b)
+			if val < 40 || sat < 35 {
+				continue
+			}
+			valid++
+			if hue >= 170 && hue <= 270 {
+				blueCount++
+				continue
+			}
+			if hue >= 35 && hue <= 80 {
+				yellowCount++
+			}
+		}
+	}
+	if valid < 100 {
+		return false
+	}
+	blueRatio := float64(blueCount) / float64(valid)
+	yellowRatio := float64(yellowCount) / float64(valid)
+	return blueRatio >= 0.18 && blueRatio > yellowRatio*1.6
 }
 
 // GetStats returns current engine statistics.
