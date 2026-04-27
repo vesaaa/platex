@@ -166,6 +166,38 @@ curl -X POST http://localhost:8080/api/v1/recognize \
 - `engine.onnx.threads_per_session` 建议保持 `1`，优先通过 `workers` 与 `PLATEX_MODEL_POOL_SIZE` 提升并行
 - URL 批量场景可适当提高 `engine.url.max_fetch_concurrency`（如 `16 -> 32`）
 
+Docker 场景可直接通过环境变量覆盖关键并发参数（无需改配置文件）：
+- `PLATEX_WORKERS`：覆盖 `engine.workers`
+- `PLATEX_MODEL_POOL_SIZE`：覆盖 ONNX session pool 大小
+- `PLATEX_ONNX_THREADS_PER_SESSION`：覆盖 `engine.onnx.threads_per_session`
+- `PLATEX_URL_MAX_FETCH_CONCURRENCY`：覆盖 `engine.url.max_fetch_concurrency`
+- `PLATEX_SUBMIT_TIMEOUT_MS`：覆盖 `engine.submit_timeout_ms`
+
+按容器内存规格的建议参数（CPU 充足、以吞吐优先）：
+- 8G 容器：
+  - `PLATEX_WORKERS=8`
+  - `PLATEX_MODEL_POOL_SIZE=4`
+  - `PLATEX_ONNX_THREADS_PER_SESSION=1`
+  - `PLATEX_URL_MAX_FETCH_CONCURRENCY=16`
+  - `PLATEX_SUBMIT_TIMEOUT_MS=200`
+- 16G 容器：
+  - `PLATEX_WORKERS=12`
+  - `PLATEX_MODEL_POOL_SIZE=6`
+  - `PLATEX_ONNX_THREADS_PER_SESSION=1`
+  - `PLATEX_URL_MAX_FETCH_CONCURRENCY=24`
+  - `PLATEX_SUBMIT_TIMEOUT_MS=200`
+- 32G 容器：
+  - `PLATEX_WORKERS=18`
+  - `PLATEX_MODEL_POOL_SIZE=8`
+  - `PLATEX_ONNX_THREADS_PER_SESSION=1`
+  - `PLATEX_URL_MAX_FETCH_CONCURRENCY=32`
+  - `PLATEX_SUBMIT_TIMEOUT_MS=150`
+
+说明：
+- 上述值是安全起点，最终以你的压测结果（QPS、P95、错误率）为准。
+- 调优顺序建议：先调 `PLATEX_MODEL_POOL_SIZE`，再调 `PLATEX_WORKERS`，`threads_per_session` 通常保持 `1`。
+- 如果出现 CPU 抢占明显、P95 抖动增大，优先降低 `PLATEX_WORKERS` 或 `PLATEX_MODEL_POOL_SIZE`。
+
 `mode=full` 的检测后处理参数由配置文件 `engine.detection` 控制：
 - `engine.detection.conf_threshold`: 检测置信度阈值（默认 `0.30`）
 - `engine.detection.iou_threshold`: NMS IoU 阈值（默认 `0.45`）

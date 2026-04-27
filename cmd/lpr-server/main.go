@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -65,6 +67,8 @@ func main() {
 		slog.Error("Failed to load config", "error", err)
 		os.Exit(1)
 	}
+	// Apply ENV overrides (Docker-friendly). CLI flags still have higher priority.
+	applyEnvOverrides(cfg)
 
 	// Apply CLI overrides
 	if *port > 0 {
@@ -146,6 +150,45 @@ func loadConfig(path string) (*config.Config, error) {
 
 	slog.Info("No config file found, using defaults")
 	return config.DefaultConfig(), nil
+}
+
+func applyEnvOverrides(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	if v, ok := getEnvInt("PLATEX_WORKERS"); ok && v > 0 {
+		cfg.Engine.Workers = v
+		slog.Info("Applied env override", "key", "PLATEX_WORKERS", "value", v)
+	}
+	if v, ok := getEnvInt("PLATEX_ONNX_THREADS_PER_SESSION"); ok && v > 0 {
+		cfg.Engine.ONNX.ThreadsPerSession = v
+		slog.Info("Applied env override", "key", "PLATEX_ONNX_THREADS_PER_SESSION", "value", v)
+	}
+	if v, ok := getEnvInt("PLATEX_URL_MAX_FETCH_CONCURRENCY"); ok && v > 0 {
+		cfg.Engine.URL.MaxFetchConcurrency = v
+		slog.Info("Applied env override", "key", "PLATEX_URL_MAX_FETCH_CONCURRENCY", "value", v)
+	}
+	if v, ok := getEnvInt("PLATEX_SUBMIT_TIMEOUT_MS"); ok && v > 0 {
+		cfg.Engine.SubmitTimeoutMs = v
+		slog.Info("Applied env override", "key", "PLATEX_SUBMIT_TIMEOUT_MS", "value", v)
+	}
+}
+
+func getEnvInt(key string) (int, bool) {
+	raw, ok := os.LookupEnv(key)
+	if !ok {
+		return 0, false
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		slog.Warn("Ignore invalid integer env", "key", key, "value", raw, "error", err)
+		return 0, false
+	}
+	return v, true
 }
 
 // setupLogging configures the slog default logger.
