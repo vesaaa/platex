@@ -111,3 +111,22 @@ func TestIsHighQualityCandidate_GuardsAgainstPrematureStop(t *testing.T) {
 		t.Fatalf("expected strong clean candidate to early-stop")
 	}
 }
+
+func TestShouldRejectRecoveryResult_AmbiguousLowConfidence(t *testing.T) {
+	if !shouldRejectRecoveryResult("粤L183I1", 0.69, 83.0) {
+		t.Fatalf("expected ambiguous low-confidence result to be rejected")
+	}
+	if shouldRejectRecoveryResult("粤L702D5", 0.94, 108.0) {
+		t.Fatalf("expected strong candidate to be accepted")
+	}
+}
+
+func TestRerankAmbiguousPlate_CollapsedNewEnergyCandidate(t *testing.T) {
+	in := "粤LF6064"
+	confs := []float32{0.95, 0.93, 0.86, 0.90, 0.89, 0.91, 0.92}
+	base := scorePlateCandidate(in, meanConfs(confs))
+	out, _, _ := rerankAmbiguousPlate(in, confs, base)
+	if out != "粤LFF6064" {
+		t.Fatalf("expected rerank candidate 粤LFF6064, got %s", out)
+	}
+}

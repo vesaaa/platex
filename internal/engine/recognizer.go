@@ -91,6 +91,8 @@ func (r *Recognizer) RecognizeWithResizeMode(img image.Image, resizeMode string)
 	bestAngle := 0.0
 	attemptCount := 0
 	successCount := 0
+	const maxRecoveryAttempts = 120
+	const maxRecoveryDurationMs int64 = 1200
 	recoverySources := r.recoveryVariants(img)
 	angles := r.candidateAngles(img)
 	for srcIdx, srcImg := range recoverySources {
@@ -98,6 +100,10 @@ func (r *Recognizer) RecognizeWithResizeMode(img image.Image, resizeMode string)
 		crops = append(crops, r.candidateCrops(upscaleImage(srcImg, 2))...)
 		for cropIdx, cimg := range crops {
 			for _, angle := range angles {
+				if attemptCount >= maxRecoveryAttempts ||
+					time.Since(recoveryStart).Milliseconds() >= maxRecoveryDurationMs {
+					goto RECOVERY_DONE
+				}
 				attemptCount++
 				candImg := cimg
 				if angle != 0 {
@@ -134,6 +140,15 @@ RECOVERY_DONE:
 
 	// Stage 3 (recovery only): lightweight ambiguous-char rerank.
 	best.plate, best.confs, best.score = rerankAmbiguousPlate(best.plate, best.confs, best.score)
+	if shouldRejectRecoveryResult(best.plate, best.conf, best.score) {
+		slog.Info("Recognition rejected after recovery",
+			"plate", best.plate,
+			"conf", best.conf,
+			"score", best.score,
+			"reason", "low_quality_ambiguous",
+		)
+		return "", nil, 0, nil
+	}
 
 	slog.Info("Recognition result", "plate", best.plate, "conf", best.conf, "steps", r.timeSteps, "classes", r.numClasses)
 	slog.Info("Recognition path summary",
@@ -184,11 +199,8 @@ func looksLikeCollapsedNewEnergy(r []rune) bool {
 	if marker != 'D' && marker != 'F' {
 		return false
 	}
-	if !isASCIILetter(r[3]) {
-		return false
-	}
 	digits := 0
-	for i := 4; i < len(r); i++ {
+	for i := 3; i < len(r); i++ {
 		if unicode.IsDigit(r[i]) {
 			digits++
 		}
@@ -637,6 +649,29 @@ func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (str
 		}
 	}
 
+	// Candidate C: recover possible collapsed new-energy marker as a low-priority
+	// rerank candidate (do not hard-rewrite final output).
+	// Example candidate: 粤LF6064 -> 粤LFF6064
+	if looksLikeCollapsedNewEnergy(r) && meanConfs(confs) < 0.94 {
+		cand := append([]rune(nil), r[:3]...)
+		cand = append(cand, unicode.ToUpper(r[2]))
+		cand = append(cand, r[3:]...)
+		candConfs := append([]float32(nil), confs[:3]...)
+		extra := confs[2] * 0.85
+		if extra < 0.60 {
+			extra = 0.60
+		}
+		candConfs = append(candConfs, extra)
+		candConfs = append(candConfs, confs[3:]...)
+		// Conservative penalty keeps it as a fallback candidate only.
+		candScore := scorePlateCandidate(string(cand), meanConfs(candConfs)) - 1.0
+		if candScore > bestScore {
+			bestScore = candScore
+			bestPlate = string(cand)
+			bestConfs = candConfs
+		}
+	}
+
 	return bestPlate, bestConfs, bestScore
 }
 
@@ -998,6 +1033,25 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 	}
 
 	return string(r), confs
+}
+
+func shouldRejectRecoveryResult(plate string, conf float32, score float32) bool {
+	r := []rune(strings.TrimSpace(plate))
+	if len(r) == 0 {
+		return true
+	}
+	if conf >= 0.78 || score >= 92 {
+		return false
+	}
+	if !looksLikeMainlandPlatePrefix(r) {
+		return true
+	}
+	// For very ambiguous low-confidence tails like ...I1, prefer empty result
+	// over a likely false positive.
+	if len(r) == 7 && unicode.ToUpper(r[5]) == 'I' && unicode.IsDigit(r[6]) {
+		return true
+	}
+	return false
 }
 
 func isChineseRune(ch rune) bool {
