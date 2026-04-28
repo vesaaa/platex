@@ -474,8 +474,16 @@ func resolveFullEarlyStopConf(defaultConf float32, opts *types.RecognizeOption) 
 	if conf <= 0 {
 		conf = 0.65
 	}
-	if opts != nil && opts.FullEarlyStopConf > 0 {
-		conf = opts.FullEarlyStopConf
+	if opts != nil {
+		if opts.FullEarlyStopConf > 0 {
+			conf = opts.FullEarlyStopConf
+		} else if opts.MaxPlates == 1 {
+			// Single-plate full-mode workloads prefer precision over aggressive
+			// early stop; tighten default short-circuit threshold automatically.
+			if conf < 0.90 {
+				conf = 0.90
+			}
+		}
 	}
 	if conf < 0.50 {
 		conf = 0.50

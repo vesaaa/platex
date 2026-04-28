@@ -1040,15 +1040,28 @@ func shouldRejectRecoveryResult(plate string, conf float32, score float32) bool 
 	if len(r) == 0 {
 		return true
 	}
+	// For very ambiguous low-confidence tails like ...I1, prefer empty result
+	// over a likely false positive regardless of structural score.
+	if len(r) == 7 && unicode.ToUpper(r[5]) == 'I' && unicode.IsDigit(r[6]) && conf < 0.80 {
+		return true
+	}
 	if conf >= 0.78 || score >= 92 {
 		return false
 	}
 	if !looksLikeMainlandPlatePrefix(r) {
 		return true
 	}
-	// For very ambiguous low-confidence tails like ...I1, prefer empty result
-	// over a likely false positive.
-	if len(r) == 7 && unicode.ToUpper(r[5]) == 'I' && unicode.IsDigit(r[6]) {
+	// Irregular length outputs from recovery are usually unstable on blurry inputs.
+	if len(r) != 7 && len(r) != 8 {
+		return true
+	}
+	// For 8-char results that do not satisfy new-energy structure, keep only
+	// stronger-confidence candidates; otherwise prefer empty over false positive.
+	if len(r) == 8 && !looksLikeNewEnergyPlate(r) && conf < 0.82 {
+		return true
+	}
+	// For 7-char results, very low confidence tends to be noisy alnum collapse.
+	if len(r) == 7 && conf < 0.72 {
 		return true
 	}
 	return false

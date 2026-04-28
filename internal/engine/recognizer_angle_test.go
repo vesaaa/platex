@@ -116,8 +116,17 @@ func TestShouldRejectRecoveryResult_AmbiguousLowConfidence(t *testing.T) {
 	if !shouldRejectRecoveryResult("粤L183I1", 0.69, 83.0) {
 		t.Fatalf("expected ambiguous low-confidence result to be rejected")
 	}
+	if !shouldRejectRecoveryResult("粤L183I1", 0.75, 105.0) {
+		t.Fatalf("expected ambiguous I/1 tail to be rejected even when score is high")
+	}
 	if shouldRejectRecoveryResult("粤L702D5", 0.94, 108.0) {
 		t.Fatalf("expected strong candidate to be accepted")
+	}
+	if !shouldRejectRecoveryResult("粤LH83S", 0.74, 84.0) {
+		t.Fatalf("expected irregular-length low-confidence result to be rejected")
+	}
+	if !shouldRejectRecoveryResult("粤LRA716L", 0.75, 90.0) {
+		t.Fatalf("expected non-NEV 8-char low-confidence result to be rejected")
 	}
 }
 
