@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
@@ -50,12 +51,24 @@ func destroyONNXRuntime() error {
 func resolvePoolSize() int {
 	// Optional runtime override for throughput tuning.
 	if raw := os.Getenv("PLATEX_MODEL_POOL_SIZE"); raw != "" {
-		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
-			if v > 8 {
-				return 8
+		trimmed := strings.TrimSpace(raw)
+		if v, err := strconv.Atoi(trimmed); err == nil && v > 0 {
+			if v > 16 {
+				slog.Warn("PLATEX_MODEL_POOL_SIZE is capped",
+					"raw", raw,
+					"effective", 16,
+				)
+				return 16
 			}
+			slog.Info("Using env model pool size",
+				"raw", raw,
+				"effective", v,
+			)
 			return v
 		}
+		slog.Warn("Invalid PLATEX_MODEL_POOL_SIZE, fallback to auto",
+			"raw", raw,
+		)
 	}
 	cpu := runtime.NumCPU()
 	auto := cpu / 4
@@ -65,6 +78,10 @@ func resolvePoolSize() int {
 	if auto > 6 {
 		auto = 6
 	}
+	slog.Info("Using auto model pool size",
+		"cpu", cpu,
+		"effective", auto,
+	)
 	return auto
 }
 

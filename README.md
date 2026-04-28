@@ -169,7 +169,7 @@ curl -X POST http://localhost:8080/api/v1/recognize \
 
 并行性能调优建议（Linux）：
 - `engine.workers=0` 时自动使用 `CPU核心数`；也可通过启动参数 `-workers N` 手动覆盖
-- `PLATEX_MODEL_POOL_SIZE`：ONNX Session 池大小（默认自动 `max(2, min(6, CPU/4))`，可手动设 `4~6`）
+- `PLATEX_MODEL_POOL_SIZE`：ONNX Session 池大小（默认自动 `max(2, min(6, CPU/4))`，可手动设 `1~16`，超过会被截断为 `16`）
 - `engine.onnx.threads_per_session` 建议保持 `1`，优先通过 `workers` 与 `PLATEX_MODEL_POOL_SIZE` 提升并行
 - URL 批量场景可适当提高 `engine.url.max_fetch_concurrency`（如 `16 -> 32`）
 
