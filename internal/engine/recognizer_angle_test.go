@@ -99,3 +99,15 @@ func TestStripInnerProvinceNoise(t *testing.T) {
 		t.Fatalf("unexpected stripped result: %s", string(out))
 	}
 }
+
+func TestIsHighQualityCandidate_GuardsAgainstPrematureStop(t *testing.T) {
+	if isHighQualityCandidate("粤LFG060", 99.0) {
+		t.Fatalf("expected collapsed-new-energy-like candidate to not early-stop")
+	}
+	if isHighQualityCandidate("粤L183I1", 102.0) {
+		t.Fatalf("expected I/1 ambiguous tail candidate to not early-stop")
+	}
+	if !isHighQualityCandidate("粤B590MF", 103.0) {
+		t.Fatalf("expected strong clean candidate to early-stop")
+	}
+}

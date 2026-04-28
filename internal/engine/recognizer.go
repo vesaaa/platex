@@ -857,7 +857,28 @@ func isHighQualityCandidate(plate string, score float32) bool {
 	if !looksLikeMainlandPlatePrefix(r) {
 		return false
 	}
-	return score > 88
+	// Keep recovery search from stopping too early on plausible-but-wrong outputs.
+	// score roughly maps to confidence*100 plus structure bonuses, so score >= 100
+	// corresponds to a more reliable candidate for early termination.
+	if score < 100 {
+		return false
+	}
+	if looksLikeCollapsedNewEnergy(r) {
+		return false
+	}
+	if looksLikeTailAmbiguousI1(r) {
+		return false
+	}
+	return true
+}
+
+func looksLikeTailAmbiguousI1(r []rune) bool {
+	if len(r) != 7 || !looksLikeMainlandPlatePrefix(r) {
+		return false
+	}
+	// Common hard-case pattern on tilted crops: trailing I/1 confusion.
+	// Example: 粤L183I1 (often true target is ...H...L)
+	return unicode.ToUpper(r[5]) == 'I' && unicode.IsDigit(r[6])
 }
 
 func rotateImageGrayBG(src image.Image, angleDeg float64) image.Image {
