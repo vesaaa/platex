@@ -22,8 +22,8 @@ type Recognizer struct {
 	model       *Model
 	inputWidth  int
 	inputHeight int
-	timeSteps   int    // Detected from model output
-	numClasses  int    // Detected from model output
+	timeSteps   int // Detected from model output
+	numClasses  int // Detected from model output
 }
 
 // NewRecognizer creates a new plate character recognizer.
@@ -162,13 +162,38 @@ func needRecoverySearch(plate string, conf float32) bool {
 	if !looksLikeMainlandPlatePrefix(r) {
 		return true
 	}
-	// For standard-looking 7/8 char outputs, keep fast-path result to avoid
-	// over-correction on otherwise clear images.
+	// For standard-looking 7/8 char outputs, keep fast-path result when confidence
+	// is acceptable; still allow recovery for low-confidence tilted/noisy cases.
 	if len(r) == 7 || len(r) == 8 {
-		return false
+		// Suspected new-energy collapse/misread is more sensitive to recovery:
+		// e.g. expected 8-char NEV compressed into 7-char with low-to-mid confidence.
+		if looksLikeCollapsedNewEnergy(r) {
+			return conf < 0.85
+		}
+		return conf < 0.70
 	}
 	// Fallback: only low-confidence irregular lengths enter recovery.
 	return conf < 0.65
+}
+
+func looksLikeCollapsedNewEnergy(r []rune) bool {
+	if len(r) != 7 || !looksLikeMainlandPlatePrefix(r) {
+		return false
+	}
+	marker := unicode.ToUpper(r[2])
+	if marker != 'D' && marker != 'F' {
+		return false
+	}
+	if !isASCIILetter(r[3]) {
+		return false
+	}
+	digits := 0
+	for i := 4; i < len(r); i++ {
+		if unicode.IsDigit(r[i]) {
+			digits++
+		}
+	}
+	return digits >= 3
 }
 
 func (r *Recognizer) recoveryVariants(img image.Image) []image.Image {
@@ -187,8 +212,19 @@ func (r *Recognizer) candidateCrops(img image.Image) []image.Image {
 		return []image.Image{img}
 	}
 	ratio := float64(w) / float64(h)
-	if ratio >= 2.2 {
+	if ratio >= 2.8 {
 		return []image.Image{img}
+	}
+	if ratio >= 2.2 {
+		// Moderately wide crops can still contain tilted plates with side-border noise.
+		return []image.Image{
+			img,
+			trimWhiteFrame(img),
+			cropWithOffset(img, 0.92, -0.10, 0),
+			cropWithOffset(img, 0.92, 0.10, 0),
+			trimWhiteFrame(cropWithOffset(img, 0.92, -0.10, 0)),
+			trimWhiteFrame(cropWithOffset(img, 0.92, 0.10, 0)),
+		}
 	}
 	// For square-ish inputs, include slight left-shift crops to focus on plate body.
 	cands := []image.Image{
@@ -898,6 +934,22 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 		}
 	}
 
+	// Soft correction 2b:
+	// For standard 7-char outputs, recover D/0 confusion in the penultimate slot
+	// under a strict structural pattern and low confidence.
+	// Example: 粤L70205 -> 粤L702D5
+	if len(r) == 7 &&
+		looksLikeMainlandPlatePrefix(r) &&
+		r[5] == '0' &&
+		confs[5] < 0.78 &&
+		unicode.IsDigit(r[2]) &&
+		unicode.IsDigit(r[3]) &&
+		unicode.IsDigit(r[4]) &&
+		unicode.IsDigit(r[6]) {
+		r[5] = 'D'
+		confs[5] = 0.78
+	}
+
 	// Soft correction 3:
 	// If result length is 6 and it looks like a normal mainland plate prefix,
 	// duplicate tail digit once to recover common CTC merge drop at the end.
@@ -1159,4 +1211,3 @@ func minInt(a, b int) int {
 	}
 	return b
 }
-

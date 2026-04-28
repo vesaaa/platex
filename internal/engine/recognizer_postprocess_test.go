@@ -31,6 +31,25 @@ func TestNormalizePlateNumberWithConfidence_NoChangeWhenConfident(t *testing.T) 
 	}
 }
 
+func TestNormalizePlateNumberWithConfidence_Standard7ZeroToDNearTail(t *testing.T) {
+	in := "粤L70205"
+	want := "粤L702D5"
+	confs := []float32{0.95, 0.93, 0.92, 0.91, 0.90, 0.52, 0.94}
+	got, _ := normalizePlateNumberWithConfidence(in, confs)
+	if got != want {
+		t.Fatalf("normalizePlateNumberWithConfidence(%q)=%q, want=%q", in, got, want)
+	}
+}
+
+func TestNormalizePlateNumberWithConfidence_Standard7NoChangeWhenZeroConfident(t *testing.T) {
+	in := "粤L70205"
+	confs := []float32{0.95, 0.93, 0.92, 0.91, 0.90, 0.92, 0.94}
+	got, _ := normalizePlateNumberWithConfidence(in, confs)
+	if got != in {
+		t.Fatalf("expected unchanged output %q, got %q", in, got)
+	}
+}
+
 func TestNormalizePlateNumberWithConfidence_AppendLastDigitForLen6(t *testing.T) {
 	in := "粤LE7G2"
 	want := "粤LE7G22"
@@ -65,5 +84,3 @@ func TestClassifyPlateType_StrictNewEnergyPattern(t *testing.T) {
 		t.Fatalf("classifyPlateType(粤AP00000)=%q, want new_energy", got)
 	}
 }
-
-
