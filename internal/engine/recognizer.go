@@ -652,7 +652,7 @@ func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (str
 	// Candidate C: recover possible collapsed new-energy marker as a low-priority
 	// rerank candidate (do not hard-rewrite final output).
 	// Example candidate: 粤LF6064 -> 粤LFF6064
-	if looksLikeCollapsedNewEnergy(r) && meanConfs(confs) < 0.94 {
+	if looksLikeCollapsedNewEnergy(r) && meanConfs(confs) < 0.98 {
 		cand := append([]rune(nil), r[:3]...)
 		cand = append(cand, unicode.ToUpper(r[2]))
 		cand = append(cand, r[3:]...)
@@ -663,9 +663,7 @@ func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (str
 		}
 		candConfs = append(candConfs, extra)
 		candConfs = append(candConfs, confs[3:]...)
-		// Keep a tiny penalty to avoid over-triggering while allowing this
-		// candidate to win against obvious collapsed forms like LDxxxx.
-		candScore := scorePlateCandidate(string(cand), meanConfs(candConfs)) - 0.2
+		candScore := scorePlateCandidate(string(cand), meanConfs(candConfs))
 		if candScore > bestScore {
 			bestScore = candScore
 			bestPlate = string(cand)
@@ -980,12 +978,19 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 	// Example: 粤LD07111 -> 粤LDD7111
 	if len(r) >= 8 {
 		for i := 2; i <= len(r)-4; i++ {
-			if r[i] != '0' || confs[i] >= 0.72 {
+			if r[i] != '0' {
+				continue
+			}
+			thr := float32(0.72)
+			if i == 3 && (unicode.ToUpper(r[2]) == 'D' || unicode.ToUpper(r[2]) == 'F') {
+				thr = 0.82
+			}
+			if confs[i] >= thr {
 				continue
 			}
 			if i > 0 && isASCIILetter(r[i-1]) && allDigits(r[i+1:]) {
 				r[i] = 'D'
-				confs[i] = 0.72
+				confs[i] = thr
 				break
 			}
 		}
@@ -998,13 +1003,13 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 	if len(r) == 7 &&
 		looksLikeMainlandPlatePrefix(r) &&
 		r[5] == '0' &&
-		confs[5] < 0.78 &&
+		confs[5] < 0.85 &&
 		unicode.IsDigit(r[2]) &&
 		unicode.IsDigit(r[3]) &&
 		unicode.IsDigit(r[4]) &&
 		unicode.IsDigit(r[6]) {
 		r[5] = 'D'
-		confs[5] = 0.78
+		confs[5] = 0.85
 	}
 
 	// Soft correction 3:

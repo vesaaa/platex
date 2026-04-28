@@ -22,6 +22,16 @@ func TestNormalizePlateNumberWithConfidence_DigitZeroToD(t *testing.T) {
 	}
 }
 
+func TestNormalizePlateNumberWithConfidence_DigitZeroToDAtNEVSlot_MidConfidence(t *testing.T) {
+	in := "粤LD09793"
+	want := "粤LDD9793"
+	confs := []float32{0.95, 0.93, 0.91, 0.80, 0.92, 0.93, 0.94, 0.95}
+	got, _ := normalizePlateNumberWithConfidence(in, confs)
+	if got != want {
+		t.Fatalf("normalizePlateNumberWithConfidence(%q)=%q, want=%q", in, got, want)
+	}
+}
+
 func TestNormalizePlateNumberWithConfidence_NoChangeWhenConfident(t *testing.T) {
 	in := "粤LD07111"
 	confs := []float32{0.95, 0.93, 0.91, 0.93, 0.92, 0.93, 0.94, 0.95}
