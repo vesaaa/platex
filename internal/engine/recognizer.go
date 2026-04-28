@@ -657,14 +657,15 @@ func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (str
 		cand = append(cand, unicode.ToUpper(r[2]))
 		cand = append(cand, r[3:]...)
 		candConfs := append([]float32(nil), confs[:3]...)
-		extra := confs[2] * 0.85
+		extra := confs[2] * 0.92
 		if extra < 0.60 {
 			extra = 0.60
 		}
 		candConfs = append(candConfs, extra)
 		candConfs = append(candConfs, confs[3:]...)
-		// Conservative penalty keeps it as a fallback candidate only.
-		candScore := scorePlateCandidate(string(cand), meanConfs(candConfs)) - 1.0
+		// Keep a tiny penalty to avoid over-triggering while allowing this
+		// candidate to win against obvious collapsed forms like LDxxxx.
+		candScore := scorePlateCandidate(string(cand), meanConfs(candConfs)) - 0.2
 		if candScore > bestScore {
 			bestScore = candScore
 			bestPlate = string(cand)
@@ -1030,6 +1031,20 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 		confs[7] < 0.95 {
 		r = r[:7]
 		confs = confs[:7]
+	}
+	// Soft correction 4b:
+	// Similar to 4, but for trailing digit noise (commonly appended '1').
+	// Example: 粤LHA7151 -> 粤LHA715
+	if len(r) == 8 &&
+		looksLikeMainlandPlatePrefix(r) &&
+		!looksLikeNewEnergyPlate(r) &&
+		unicode.IsDigit(r[7]) &&
+		mainlandFormatScore(r[:7]) > 0 {
+		avg := meanConfs(confs[:7])
+		if confs[7] < 0.88 && confs[7]+0.08 < avg {
+			r = r[:7]
+			confs = confs[:7]
+		}
 	}
 
 	return string(r), confs
