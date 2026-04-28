@@ -183,7 +183,12 @@ func needRecoverySearch(plate string, conf float32) bool {
 		// Suspected new-energy collapse/misread is more sensitive to recovery:
 		// e.g. expected 8-char NEV compressed into 7-char with low-to-mid confidence.
 		if looksLikeCollapsedNewEnergy(r) {
-			return conf < 0.85
+			return conf < 0.93
+		}
+		// 8-char outputs that don't satisfy NEV structure are often noisy
+		// over-decodes in full-mode; give them a wider recovery window.
+		if len(r) == 8 && !looksLikeNewEnergyPlate(r) {
+			return conf < 0.90
 		}
 		return conf < 0.70
 	}

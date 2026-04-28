@@ -38,8 +38,17 @@ func TestNeedRecoverySearch(t *testing.T) {
 	if !needRecoverySearch("粤LFG060", 0.82) {
 		t.Fatalf("expected suspected collapsed new-energy plate to require recovery")
 	}
-	if needRecoverySearch("粤LFG060", 0.90) {
+	if !needRecoverySearch("粤LFG060", 0.90) {
+		t.Fatalf("expected mid-high-confidence collapsed-new-energy to still require recovery")
+	}
+	if needRecoverySearch("粤LFG060", 0.95) {
 		t.Fatalf("expected high-confidence suspected collapsed new-energy plate to skip recovery")
+	}
+	if !needRecoverySearch("粤LRA716L", 0.82) {
+		t.Fatalf("expected low-confidence 8-char non-NEV output to require recovery")
+	}
+	if needRecoverySearch("粤LRA716L", 0.93) {
+		t.Fatalf("expected high-confidence 8-char non-NEV output to skip recovery")
 	}
 	if !needRecoverySearch("粤B590M", 0.40) {
 		t.Fatalf("expected irregular length low-conf plate to require recovery")
