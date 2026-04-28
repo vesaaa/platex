@@ -110,41 +110,43 @@ func (r *Recognizer) RecognizeWithResizeMode(img image.Image, resizeMode string)
 				if angle != 0 {
 					candImg = rotateImageGrayBG(cimg, angle)
 				}
-				pn, pc, cf, e := r.recognizeSingleAngle(candImg, true, resizeMode)
-				if e != nil {
+				cands, e := r.recognizeRecoveryCandidates(candImg, resizeMode)
+				if e != nil || len(cands) == 0 {
 					continue
 				}
 				successCount++
-				score := scorePlateCandidate(pn, cf)
-				if pn != "" {
-					if st := agg[pn]; st == nil {
-						agg[pn] = &recoveryCandidateStat{
-							count:     1,
-							bestScore: score,
-							bestConf:  cf,
-							bestConfs: append([]float32(nil), pc...),
-						}
-					} else {
-						st.count++
-						if score > st.bestScore {
-							st.bestScore = score
-							st.bestConf = cf
-							st.bestConfs = append([]float32(nil), pc...)
+				for _, cand := range cands {
+					pn, pc, cf, score := cand.plate, cand.confs, cand.conf, cand.score
+					if pn != "" {
+						if st := agg[pn]; st == nil {
+							agg[pn] = &recoveryCandidateStat{
+								count:     1,
+								bestScore: score,
+								bestConf:  cf,
+								bestConfs: append([]float32(nil), pc...),
+							}
+						} else {
+							st.count++
+							if score > st.bestScore {
+								st.bestScore = score
+								st.bestConf = cf
+								st.bestConfs = append([]float32(nil), pc...)
+							}
 						}
 					}
-				}
-				if score > best.score {
-					best = recognizeCandidateResult{
-						plate: pn,
-						confs: pc,
-						conf:  cf,
-						score: score,
-					}
-					bestSrcIdx = srcIdx
-					bestCropIdx = cropIdx
-					bestAngle = angle
-					if isHighQualityCandidate(best.plate, best.score) {
-						goto RECOVERY_DONE
+					if score > best.score {
+						best = recognizeCandidateResult{
+							plate: pn,
+							confs: pc,
+							conf:  cf,
+							score: score,
+						}
+						bestSrcIdx = srcIdx
+						bestCropIdx = cropIdx
+						bestAngle = angle
+						if isHighQualityCandidate(best.plate, best.score) {
+							goto RECOVERY_DONE
+						}
 					}
 				}
 			}
@@ -457,10 +459,53 @@ func (r *Recognizer) recognizeSingleAngle(img image.Image, useBeam bool, resizeM
 
 	plateNumber, charConfs, avgConf := ctcDecode(output, r.timeSteps, r.numClasses)
 	if useBeam {
-		plateNumber, charConfs, avgConf = ctcBeamDecodeWithGrammar(output, r.timeSteps, r.numClasses, 6, 3)
+		plateNumber, charConfs, avgConf = ctcBeamDecodeWithGrammar(output, r.timeSteps, r.numClasses, 8, 4)
 	}
 	plateNumber, charConfs = normalizePlateNumberWithConfidence(plateNumber, charConfs)
 	return plateNumber, charConfs, avgConf, nil
+}
+
+func (r *Recognizer) recognizeRecoveryCandidates(img image.Image, resizeMode string) ([]recognizeCandidateResult, error) {
+	useLetterbox := r.shouldUseLetterbox(img, resizeMode)
+	_ = useLetterbox
+	tensor := r.preprocessPlate(img)
+	output, err := r.runInference(tensor)
+	if err != nil {
+		return nil, fmt.Errorf("inference: %w", err)
+	}
+	out := make([]recognizeCandidateResult, 0, 4)
+	seen := map[string]struct{}{}
+	// Candidate 1: greedy decode
+	gPlate, gConfs, gAvg := ctcDecode(output, r.timeSteps, r.numClasses)
+	gPlate, gConfs = normalizePlateNumberWithConfidence(gPlate, gConfs)
+	if gPlate != "" {
+		out = append(out, recognizeCandidateResult{
+			plate: gPlate,
+			confs: gConfs,
+			conf:  gAvg,
+			score: scorePlateCandidate(gPlate, gAvg),
+		})
+		seen[gPlate] = struct{}{}
+	}
+	// Candidate 2..N: beam n-best decode
+	nb := ctcBeamDecodeNBest(output, r.timeSteps, r.numClasses, 8, 4, 3)
+	for _, c := range nb {
+		pn, pc := normalizePlateNumberWithConfidence(c.plate, c.confs)
+		if pn == "" {
+			continue
+		}
+		if _, ok := seen[pn]; ok {
+			continue
+		}
+		out = append(out, recognizeCandidateResult{
+			plate: pn,
+			confs: pc,
+			conf:  c.conf,
+			score: scorePlateCandidate(pn, c.conf),
+		})
+		seen[pn] = struct{}{}
+	}
+	return out, nil
 }
 
 type ctcBeamState struct {
@@ -471,8 +516,16 @@ type ctcBeamState struct {
 }
 
 func ctcBeamDecodeWithGrammar(output []float32, timeSteps, numClasses, beamWidth, topK int) (string, []float32, float32) {
-	if len(output) == 0 || timeSteps <= 0 || numClasses <= 0 {
+	cands := ctcBeamDecodeNBest(output, timeSteps, numClasses, beamWidth, topK, 1)
+	if len(cands) == 0 {
 		return "", nil, 0
+	}
+	return cands[0].plate, cands[0].confs, cands[0].conf
+}
+
+func ctcBeamDecodeNBest(output []float32, timeSteps, numClasses, beamWidth, topK, nBest int) []recognizeCandidateResult {
+	if len(output) == 0 || timeSteps <= 0 || numClasses <= 0 {
+		return nil
 	}
 	if beamWidth < 2 {
 		beamWidth = 2
@@ -521,24 +574,41 @@ func ctcBeamDecodeWithGrammar(output []float32, timeSteps, numClasses, beamWidth
 		}
 	}
 	if len(beams) == 0 {
-		return "", nil, 0
+		return nil
 	}
-	best := beams[0]
-	best.score += finalPatternBonus(best.text)
-	for i := 1; i < len(beams); i++ {
-		s := beams[i]
-		score := s.score + finalPatternBonus(s.text)
-		if score > best.score {
-			best = s
-			best.score = score
-		}
+	type beamOut struct {
+		plate string
+		confs []float32
+		conf  float32
+		score float64
 	}
-	plate := string(best.text)
-	var avg float32
-	if len(best.confs) > 0 {
-		avg = meanConfs(best.confs)
+	outs := make([]beamOut, 0, len(beams))
+	for _, b := range beams {
+		p := string(b.text)
+		cf := meanConfs(b.confs)
+		outs = append(outs, beamOut{
+			plate: p,
+			confs: append([]float32(nil), b.confs...),
+			conf:  cf,
+			score: b.score + finalPatternBonus(b.text),
+		})
 	}
-	return plate, best.confs, avg
+	sort.Slice(outs, func(i, j int) bool { return outs[i].score > outs[j].score })
+	if nBest <= 0 {
+		nBest = 1
+	}
+	if len(outs) > nBest {
+		outs = outs[:nBest]
+	}
+	res := make([]recognizeCandidateResult, 0, len(outs))
+	for _, o := range outs {
+		res = append(res, recognizeCandidateResult{
+			plate: o.plate,
+			confs: o.confs,
+			conf:  o.conf,
+		})
+	}
+	return res
 }
 
 func topKIndicesAtTimestep(output []float32, t, numClasses, k int) []int {
