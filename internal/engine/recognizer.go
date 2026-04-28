@@ -91,6 +91,7 @@ func (r *Recognizer) RecognizeWithResizeMode(img image.Image, resizeMode string)
 	bestAngle := 0.0
 	attemptCount := 0
 	successCount := 0
+	agg := make(map[string]*recoveryCandidateStat, 32)
 	const maxRecoveryAttempts = 120
 	const maxRecoveryDurationMs int64 = 1200
 	recoverySources := r.recoveryVariants(img)
@@ -115,6 +116,23 @@ func (r *Recognizer) RecognizeWithResizeMode(img image.Image, resizeMode string)
 				}
 				successCount++
 				score := scorePlateCandidate(pn, cf)
+				if pn != "" {
+					if st := agg[pn]; st == nil {
+						agg[pn] = &recoveryCandidateStat{
+							count:     1,
+							bestScore: score,
+							bestConf:  cf,
+							bestConfs: append([]float32(nil), pc...),
+						}
+					} else {
+						st.count++
+						if score > st.bestScore {
+							st.bestScore = score
+							st.bestConf = cf
+							st.bestConfs = append([]float32(nil), pc...)
+						}
+					}
+				}
 				if score > best.score {
 					best = recognizeCandidateResult{
 						plate: pn,
@@ -136,6 +154,13 @@ RECOVERY_DONE:
 
 	if best.score <= float32(-1e8) {
 		return "", nil, 0, fmt.Errorf("inference: no valid candidate")
+	}
+	if consensus := selectConsensusRecoveryCandidate(agg); consensus != nil {
+		// Prefer repeated stable candidates over one-shot score spikes.
+		if consensus.score > best.score+0.8 ||
+			(consensus.score > best.score-0.2 && consensus.conf > best.conf+0.03) {
+			best = *consensus
+		}
 	}
 
 	// Stage 3 (recovery only): lightweight ambiguous-char rerank.
@@ -167,6 +192,37 @@ RECOVERY_DONE:
 		"best_angle", bestAngle,
 	)
 	return best.plate, best.confs, best.conf, nil
+}
+
+func selectConsensusRecoveryCandidate(agg map[string]*recoveryCandidateStat) *recognizeCandidateResult {
+	if len(agg) == 0 {
+		return nil
+	}
+	var out *recognizeCandidateResult
+	bestComposite := float32(-1e9)
+	for plate, st := range agg {
+		if st == nil || st.count <= 0 {
+			continue
+		}
+		composite := st.bestScore
+		if st.count > 1 {
+			bonus := float32(st.count-1) * 1.0
+			if bonus > 3.0 {
+				bonus = 3.0
+			}
+			composite += bonus
+		}
+		if composite > bestComposite {
+			bestComposite = composite
+			out = &recognizeCandidateResult{
+				plate: plate,
+				confs: append([]float32(nil), st.bestConfs...),
+				conf:  st.bestConf,
+				score: st.bestScore,
+			}
+		}
+	}
+	return out
 }
 
 func needRecoverySearch(plate string, conf float32) bool {
@@ -379,6 +435,13 @@ type recognizeCandidateResult struct {
 	confs []float32
 	conf  float32
 	score float32
+}
+
+type recoveryCandidateStat struct {
+	count     int
+	bestScore float32
+	bestConf  float32
+	bestConfs []float32
 }
 
 func (r *Recognizer) recognizeSingleAngle(img image.Image, useBeam bool, resizeMode string) (string, []float32, float32, error) {

@@ -148,3 +148,17 @@ func TestRerankAmbiguousPlate_CollapsedNewEnergyCandidate(t *testing.T) {
 		t.Fatalf("expected rerank candidate 粤LFF6064, got %s", out)
 	}
 }
+
+func TestSelectConsensusRecoveryCandidate(t *testing.T) {
+	agg := map[string]*recoveryCandidateStat{
+		"粤L12345": {count: 1, bestScore: 94, bestConf: 0.86, bestConfs: []float32{0.9}},
+		"粤L1234S": {count: 3, bestScore: 93, bestConf: 0.84, bestConfs: []float32{0.88}},
+	}
+	got := selectConsensusRecoveryCandidate(agg)
+	if got == nil {
+		t.Fatalf("expected non-nil consensus candidate")
+	}
+	if got.plate != "粤L1234S" {
+		t.Fatalf("expected repeated candidate to win, got %s", got.plate)
+	}
+}
