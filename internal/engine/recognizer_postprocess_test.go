@@ -90,6 +90,26 @@ func TestNormalizePlateNumberWithConfidence_TrimNonNEVTrailingDigitNoise(t *test
 	}
 }
 
+func TestNormalizePlateNumberWithConfidence_DropInteriorNoiseFromNonNEV8(t *testing.T) {
+	in := "粤LVE8351"
+	want := "粤LVE835"
+	confs := []float32{0.97, 0.95, 0.94, 0.93, 0.92, 0.93, 0.94, 0.72}
+	got, _ := normalizePlateNumberWithConfidence(in, confs)
+	if got != want {
+		t.Fatalf("normalizePlateNumberWithConfidence(%q)=%q, want=%q", in, got, want)
+	}
+}
+
+func TestNormalizePlateNumberWithConfidence_CollapsedNEVByScore(t *testing.T) {
+	in := "粤LD8379"
+	want := "粤LDD8379"
+	confs := []float32{0.95, 0.93, 0.90, 0.88, 0.89, 0.90, 0.91}
+	got, _ := normalizePlateNumberWithConfidence(in, confs)
+	if got != want {
+		t.Fatalf("normalizePlateNumberWithConfidence(%q)=%q, want=%q", in, got, want)
+	}
+}
+
 func TestClassifyPlateType_StrictNewEnergyPattern(t *testing.T) {
 	if got := classifyPlateType("粤LRA716L"); got != "unknown" {
 		t.Fatalf("classifyPlateType(粤LRA716L)=%q, want unknown", got)

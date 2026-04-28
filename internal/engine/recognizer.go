@@ -1051,6 +1051,56 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 			confs = confs[:7]
 		}
 	}
+	// Soft correction 4c:
+	// For 8-char non-NEV outputs, try dropping one interior noisy char and
+	// keep the best-scoring 7-char candidate.
+	if len(r) == 8 &&
+		looksLikeMainlandPlatePrefix(r) &&
+		!looksLikeNewEnergyPlate(r) {
+		baseScore := scorePlateCandidate(string(r), meanConfs(confs))
+		bestR := r
+		bestC := confs
+		bestScore := baseScore
+		for i := 2; i <= 6; i++ {
+			candR := append([]rune(nil), r[:i]...)
+			candR = append(candR, r[i+1:]...)
+			candC := append([]float32(nil), confs[:i]...)
+			candC = append(candC, confs[i+1:]...)
+			if len(candR) != 7 || !looksLikeMainlandPlatePrefix(candR) {
+				continue
+			}
+			candScore := scorePlateCandidate(string(candR), meanConfs(candC)) + 0.2
+			if candScore > bestScore+0.6 {
+				bestScore = candScore
+				bestR = candR
+				bestC = candC
+			}
+		}
+		r = bestR
+		confs = bestC
+	}
+
+	// Soft correction 4d:
+	// For suspicious 7-char collapsed NEV outputs, compare with duplicated
+	// marker candidate and keep the better-scoring one.
+	if len(r) == 7 && looksLikeCollapsedNewEnergy(r) {
+		baseScore := scorePlateCandidate(string(r), meanConfs(confs))
+		candR := append([]rune(nil), r[:3]...)
+		candR = append(candR, unicode.ToUpper(r[2]))
+		candR = append(candR, r[3:]...)
+		candC := append([]float32(nil), confs[:3]...)
+		extra := confs[2] * 0.92
+		if extra < 0.65 {
+			extra = 0.65
+		}
+		candC = append(candC, extra)
+		candC = append(candC, confs[3:]...)
+		candScore := scorePlateCandidate(string(candR), meanConfs(candC))
+		if candScore > baseScore+0.5 {
+			r = candR
+			confs = candC
+		}
+	}
 
 	return string(r), confs
 }
