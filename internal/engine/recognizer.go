@@ -734,7 +734,7 @@ func scorePlateCandidate(plate string, conf float32) float32 {
 
 func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (string, []float32, float32) {
 	r := []rune(strings.TrimSpace(plate))
-	if len(r) != 7 || len(confs) != len(r) || !looksLikeMainlandPlatePrefix(r) {
+	if (len(r) != 7 && len(r) != 8) || len(confs) != len(r) || !looksLikeMainlandPlatePrefix(r) {
 		return plate, confs, baseScore
 	}
 
@@ -809,7 +809,48 @@ func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (str
 		}
 	}
 
+	// Candidate D: data-driven single-char confusion correction (low-confidence only).
+	// Built from benchmark failure pairs, applied conservatively to avoid overfit.
+	for i := 2; i < len(r); i++ {
+		if confs[i] >= 0.86 {
+			continue
+		}
+		for _, repl := range confusionCorrections(r[i], i) {
+			if repl == r[i] {
+				continue
+			}
+			cand := append([]rune(nil), r...)
+			cand[i] = repl
+			candConfs := append([]float32(nil), confs...)
+			if candConfs[i] < 0.72 {
+				candConfs[i] = 0.72
+			}
+			candScore := scorePlateCandidate(string(cand), meanConfs(candConfs)) - 0.45
+			if candScore > bestScore {
+				bestScore = candScore
+				bestPlate = string(cand)
+				bestConfs = candConfs
+			}
+		}
+	}
+
 	return bestPlate, bestConfs, bestScore
+}
+
+func confusionCorrections(ch rune, pos int) []rune {
+	up := unicode.ToUpper(ch)
+	switch up {
+	case '0':
+		return []rune{'D'}
+	case '7':
+		// 7/1 is frequent in blurred vertical strokes.
+		return []rune{'1'}
+	case 'E':
+		// Tail letter E is frequently confused with L.
+		return []rune{'L'}
+	default:
+		return nil
+	}
 }
 
 func ambiguousLettersForDigit(d rune) []rune {

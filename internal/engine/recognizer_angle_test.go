@@ -162,3 +162,13 @@ func TestSelectConsensusRecoveryCandidate(t *testing.T) {
 		t.Fatalf("expected repeated candidate to win, got %s", got.plate)
 	}
 }
+
+func TestRerankAmbiguousPlate_DataDrivenConfusions(t *testing.T) {
+	in := "粤L7890V"
+	confs := []float32{0.95, 0.93, 0.92, 0.91, 0.90, 0.62, 0.94}
+	base := scorePlateCandidate(in, meanConfs(confs))
+	out, _, _ := rerankAmbiguousPlate(in, confs, base)
+	if out != "粤L789DV" {
+		t.Fatalf("expected data-driven correction to 粤L789DV, got %s", out)
+	}
+}
