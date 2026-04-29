@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased — Notes from the YOLO26 evaluation (2026-04-29)
+
+- Evaluated the upstream-newer detector model `yolo26s-plate-detect.pt`
+  (we0091234/yolo26-plate, Ultralytics YOLO26 pose, 64MB) as a drop-in
+  replacement for the YOLOv5-face detector currently in use.
+- Result on the same 1000-image test set:
+  - pass rate: `92.8% -> 82.4%` (-10.4pt regression)
+  - QPS: `57 -> 9.7` (5.8x slower due to model size)
+  - Failure mode: YOLO26 was trained for full-frame scenes and on already-
+    cropped plate inputs (e.g. 192x176) it consistently emits keypoints that
+    chop the leftmost province character. 47 cases out of 176 mismatches show
+    `粤 -> L` at position 0; same pattern explains `D/F/B/A/W` substitutions.
+- Tried multiple ensemble policies on top of v0.7.0 (always-run WE,
+  loosened/strict alignment requirements, exact-insertion match). None went
+  above 92.9%. The empirical fusion ceiling on this dataset is `~92.9%`
+  even though the "any-model-correct" oracle ceiling is `~98.5%`. Closing
+  that gap requires a runtime signal we don't currently have (e.g. a
+  learned arbiter, or per-character confidence calibration).
+- Conclusion: keep `v0.7.0` as the production baseline. Path to 98%+ now
+  squarely depends on either a higher-timestep recognizer or a small
+  learned arbiter trained on the failure set.
+
 ## v0.7.0
 
 - Add a dual-recognizer ensemble path. The HyperLPR3 v3 SVTR-LCNet model

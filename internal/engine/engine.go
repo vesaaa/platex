@@ -527,16 +527,13 @@ func shouldRunEnsemble(plate string, conf float32) bool {
 	if !looksLikeMainlandPlatePrefix(r) {
 		return true
 	}
-	// Length boundary cases benefit from WE recovery.
 	if len(r) == 7 && conf < 0.97 {
 		return true
 	}
 	if len(r) == 8 {
-		// Non-NEV 8-char outputs are usually CTC tail-noise; trigger ensemble.
 		if !looksLikeNewEnergyPlate(r) && conf < 0.97 {
 			return true
 		}
-		// NEV outputs only get checked when very low confidence.
 		if conf < 0.85 {
 			return true
 		}
@@ -586,22 +583,11 @@ func pickBetterPlateCandidate(primary string, pConf float32, we string, weConf f
 			return "we"
 		}
 	}
-	// 8 -> 7 length trim. Accept WE only when primary's confidence is mid-low,
-	// primary is not a valid NEV (NEV-shaped should not be trimmed), and WE
-	// agrees on at least 6 positions.
+	// 8 -> 7 length trim: WE must equal primary's first 7 chars when primary
+	// is not a valid NEV (NEV-shaped should not be trimmed) and primary is
+	// mid-confidence at most.
 	if len(pr) == 8 && len(wr) == 7 && weConf >= 0.86 && !looksLikeNewEnergyPlate(pr) && pConf < 0.93 {
 		if alignmentMatches(pr[:7], wr) >= 6 {
-			return "we"
-		}
-	}
-	// Same length recovery: only allow when primary confidence is low and WE
-	// agrees on most positions and is more confident.
-	if len(pr) == len(wr) && weConf >= pConf+0.05 && pConf < 0.85 {
-		need := len(pr) - 1
-		if need < 6 {
-			need = 6
-		}
-		if alignmentMatch(pr, wr, need) {
 			return "we"
 		}
 	}
