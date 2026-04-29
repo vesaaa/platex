@@ -177,9 +177,16 @@ Docker 场景可直接通过环境变量覆盖关键并发参数（无需改配�
 - `PLATEX_WORKERS`：覆盖 `engine.workers`
 - `PLATEX_MODEL_POOL_SIZE`：覆盖 ONNX session pool 大小
 - `PLATEX_ONNX_THREADS_PER_SESSION`：覆盖 `engine.onnx.threads_per_session`
+- `PLATEX_ONNX_PROVIDER`：ONNX 推理后端（`cpu` 默认，或 `cuda`）
+- `PLATEX_ONNX_CUDA_DEVICE_ID`：当 `PLATEX_ONNX_PROVIDER=cuda` 时指定 GPU 序号（默认 `0`）
 - `PLATEX_URL_MAX_FETCH_CONCURRENCY`：覆盖 `engine.url.max_fetch_concurrency`
 - `PLATEX_SUBMIT_TIMEOUT_MS`：覆盖 `engine.submit_timeout_ms`
 - `PLATEX_FULL_EARLY_STOP_CONF`：覆盖 `engine.recognition.full_early_stop_conf`（默认 `0.65`，用于 full 模式直识别命中即停）
+
+GPU 使用说明（Linux）：
+- 默认 `PLATEX_ONNX_PROVIDER=cpu`，不使用 GPU。
+- 如需启用 CUDA：设置 `PLATEX_ONNX_PROVIDER=cuda`，可选设置 `PLATEX_ONNX_CUDA_DEVICE_ID`。
+- 注意：需要 CUDA 版本的 ONNX Runtime 共享库及 NVIDIA 运行环境；若依赖不完整，服务启动会报错。
 
 按容器内存规格的建议参数（CPU 充足、以吞吐优先）：
 - 8G 容器：

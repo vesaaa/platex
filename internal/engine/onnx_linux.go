@@ -14,6 +14,38 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 )
 
+func configureExecutionProvider(opts *ort.SessionOptions) error {
+	provider := strings.ToLower(strings.TrimSpace(os.Getenv("PLATEX_ONNX_PROVIDER")))
+	if provider == "" || provider == "cpu" {
+		slog.Info("Using ONNX execution provider", "provider", "cpu")
+		return nil
+	}
+
+	switch provider {
+	case "cuda":
+		cudaOpts, err := ort.NewCUDAProviderOptions()
+		if err != nil {
+			return fmt.Errorf("create CUDA provider options: %w", err)
+		}
+		defer cudaOpts.Destroy()
+
+		deviceID := strings.TrimSpace(os.Getenv("PLATEX_ONNX_CUDA_DEVICE_ID"))
+		if deviceID == "" {
+			deviceID = "0"
+		}
+		if err := cudaOpts.Update(map[string]string{"device_id": deviceID}); err != nil {
+			return fmt.Errorf("update CUDA provider options: %w", err)
+		}
+		if err := opts.AppendExecutionProviderCUDA(cudaOpts); err != nil {
+			return fmt.Errorf("append CUDA execution provider: %w", err)
+		}
+		slog.Info("Using ONNX execution provider", "provider", "cuda", "device_id", deviceID)
+		return nil
+	default:
+		return fmt.Errorf("unsupported PLATEX_ONNX_PROVIDER: %q (supported: cpu,cuda)", provider)
+	}
+}
+
 type modelRunner struct {
 	session       *ort.AdvancedSession
 	inputTensor   *ort.Tensor[float32]
@@ -171,6 +203,9 @@ func loadModel(modelPath string, threads int, optLevel int) (*Model, error) {
 	if err := opts.SetIntraOpNumThreads(threads); err != nil {
 		return nil, fmt.Errorf("set threads: %w", err)
 	}
+	if err := configureExecutionProvider(opts); err != nil {
+		return nil, fmt.Errorf("configure execution provider: %w", err)
+	}
 
 	modelBytes, err := os.ReadFile(absPath)
 	if err != nil {
@@ -246,6 +281,9 @@ func loadModelDual(modelPath string, threads int, optLevel int) (*Model, error) 
 	defer opts.Destroy()
 	if err := opts.SetIntraOpNumThreads(threads); err != nil {
 		return nil, fmt.Errorf("set threads: %w", err)
+	}
+	if err := configureExecutionProvider(opts); err != nil {
+		return nil, fmt.Errorf("configure execution provider: %w", err)
 	}
 
 	modelBytes, err := os.ReadFile(absPath)
