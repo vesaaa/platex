@@ -809,14 +809,17 @@ func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (str
 		}
 	}
 
-	// Candidate D: data-driven single-char confusion correction (low-confidence only).
-	// Built from benchmark failure pairs, applied conservatively to avoid overfit.
+	// Candidate D: lightweight binary-feature classifier for high-frequency confusions.
+	// Trigger only on low-confidence conflicting chars to keep fast-path cost near zero.
 	for i := 2; i < len(r); i++ {
 		if confs[i] >= 0.86 {
 			continue
 		}
-		for _, repl := range confusionCorrections(r[i], i) {
+		for _, repl := range confusionCorrections(r[i], i, len(r)) {
 			if repl == r[i] {
+				continue
+			}
+			if !preferConfusionReplacement(r, confs, i, repl) {
 				continue
 			}
 			cand := append([]rune(nil), r...)
@@ -825,7 +828,8 @@ func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (str
 			if candConfs[i] < 0.72 {
 				candConfs[i] = 0.72
 			}
-			candScore := scorePlateCandidate(string(cand), meanConfs(candConfs)) - 0.45
+			penalty := confusionReplacementPenalty(r[i], repl, i, len(r))
+			candScore := scorePlateCandidate(string(cand), meanConfs(candConfs)) - penalty
 			if candScore > bestScore {
 				bestScore = candScore
 				bestPlate = string(cand)
@@ -834,10 +838,31 @@ func rerankAmbiguousPlate(plate string, confs []float32, baseScore float32) (str
 		}
 	}
 
+	// Candidate E: lightweight 7<->8 length disambiguation for low-confidence tails.
+	// Only runs in recovery rerank and does not introduce extra model inference.
+	if lp, lc, ok := rerankLengthMismatchCandidate(r, confs); ok {
+		candScore := scorePlateCandidate(lp, meanConfs(lc)) - 0.15
+		if candScore > bestScore {
+			bestScore = candScore
+			bestPlate = lp
+			bestConfs = lc
+		}
+	}
+	// Candidate F: tail I/1 ambiguity fixer for tilted low-confidence samples.
+	// Example hard case: 粤L183I1 -> 粤LH835L
+	if tp, tc, ok := rerankTailI1Candidate(r, confs); ok {
+		candScore := scorePlateCandidate(tp, meanConfs(tc)) - 0.25
+		if candScore > bestScore {
+			bestScore = candScore
+			bestPlate = tp
+			bestConfs = tc
+		}
+	}
+
 	return bestPlate, bestConfs, bestScore
 }
 
-func confusionCorrections(ch rune, pos int) []rune {
+func confusionCorrections(ch rune, pos, total int) []rune {
 	up := unicode.ToUpper(ch)
 	switch up {
 	case '0':
@@ -848,9 +873,200 @@ func confusionCorrections(ch rune, pos int) []rune {
 	case 'E':
 		// Tail letter E is frequently confused with L.
 		return []rune{'L'}
+	case '8':
+		// Tail 8/4 confusion appears on thin-stroke blurry digits.
+		if total >= 7 && pos == total-1 {
+			return []rune{'4'}
+		}
+		return nil
 	default:
 		return nil
 	}
+}
+
+func confusionReplacementPenalty(orig, repl rune, pos, total int) float32 {
+	o := unicode.ToUpper(orig)
+	r := unicode.ToUpper(repl)
+	// Tail digit micro-correction: keep conservative but lower penalty.
+	if total >= 7 && pos == total-1 && o == '8' && r == '4' {
+		return 0.05
+	}
+	return 0.20
+}
+
+func preferConfusionReplacement(r []rune, confs []float32, pos int, repl rune) bool {
+	if pos < 2 || pos >= len(r) || pos >= len(confs) {
+		return false
+	}
+	orig := unicode.ToUpper(r[pos])
+	repl = unicode.ToUpper(repl)
+	if orig == repl {
+		return false
+	}
+	// Binary decision by signed feature score:
+	// positive => replacement likely correct, negative => keep original.
+	feature := float32(0)
+	curConf := confs[pos]
+	if curConf >= 0.86 {
+		return false
+	}
+	feature += (0.82 - curConf) * 2.0
+
+	switch {
+	case (orig == '0' && repl == 'D') || (orig == 'D' && repl == '0'):
+		// Alnum slots after province/city prefix usually prefer letters near NEV marker slot.
+		if pos == 3 && len(r) >= 7 && looksLikeMainlandPlatePrefix(r) {
+			feature += 0.60
+		}
+		if pos >= 2 && pos <= 5 && hasFollowingDigitRun(r, pos+1, 2) {
+			feature += 0.32
+		}
+		if pos > 0 && isASCIILetter(r[pos-1]) {
+			feature += 0.18
+		}
+		if pos+1 < len(r) && isASCIILetter(r[pos+1]) {
+			feature -= 0.20
+		}
+		if pos == len(r)-2 && pos+1 < len(r) && isASCIILetter(r[pos+1]) && pos > 1 && unicode.IsDigit(r[pos-1]) {
+			feature += 0.36
+		}
+		if curConf > 0.80 {
+			feature -= 0.25
+		}
+		return feature >= 0.45
+	case (orig == '7' && repl == '1') || (orig == '1' && repl == '7'):
+		// Tail vertical-stroke confusion is common; only allow when nearby pattern remains valid.
+		if pos >= len(r)-3 {
+			feature += 0.24
+		}
+		if pos > 1 && (unicode.IsDigit(r[pos-1]) || isASCIILetter(r[pos-1])) {
+			feature += 0.14
+		}
+		if curConf > 0.78 {
+			feature -= 0.22
+		}
+		return feature >= 0.42
+	case (orig == 'E' && repl == 'L') || (orig == 'L' && repl == 'E'):
+		// E/L tends to appear in city/tail letter positions.
+		if pos == 1 || pos >= 4 {
+			feature += 0.26
+		}
+		if pos+1 < len(r) && unicode.IsDigit(r[pos+1]) {
+			feature += 0.10
+		}
+		if curConf > 0.80 {
+			feature -= 0.24
+		}
+		return feature >= 0.40
+	case (orig == '8' && repl == '4') || (orig == '4' && repl == '8'):
+		// Very conservative: only for last char with low confidence.
+		if pos == len(r)-1 {
+			feature += 0.30
+		}
+		if pos > 1 && unicode.IsDigit(r[pos-1]) {
+			feature += 0.12
+		}
+		if curConf > 0.78 {
+			feature -= 0.30
+		}
+		return feature >= 0.44
+	default:
+		return false
+	}
+}
+
+func hasFollowingDigitRun(r []rune, start, n int) bool {
+	if n <= 0 || start < 0 || start+n > len(r) {
+		return false
+	}
+	for i := 0; i < n; i++ {
+		if !unicode.IsDigit(r[start+i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func rerankLengthMismatchCandidate(r []rune, confs []float32) (string, []float32, bool) {
+	if len(r) != len(confs) || len(r) < 7 || len(r) > 8 || !looksLikeMainlandPlatePrefix(r) {
+		return "", nil, false
+	}
+	// 7-char suspected collapsed NEV: duplicate marker at pos 2 => 8-char candidate.
+	if len(r) == 7 {
+		if !looksLikeCollapsedNewEnergy(r) {
+			return "", nil, false
+		}
+		// Skip stable high-confidence outputs; only touch ambiguous candidates.
+		if meanConfs(confs) >= 0.96 {
+			return "", nil, false
+		}
+		cand := append([]rune(nil), r[:3]...)
+		cand = append(cand, unicode.ToUpper(r[2]))
+		cand = append(cand, r[3:]...)
+		candConfs := append([]float32(nil), confs[:3]...)
+		extra := confs[2] * 0.90
+		if extra < 0.58 {
+			extra = 0.58
+		}
+		candConfs = append(candConfs, extra)
+		candConfs = append(candConfs, confs[3:]...)
+		return string(cand), candConfs, true
+	}
+	// 8-char non-NEV with weak tail: trim trailing char to recover standard 7-char.
+	if len(r) == 8 && !looksLikeNewEnergyPlate(r) {
+		tail := confs[7]
+		headAvg := meanConfs(confs[:7])
+		if (isASCIILetter(r[7]) || unicode.IsDigit(r[7])) && tail < 0.88 && tail+0.04 < headAvg {
+			return string(r[:7]), append([]float32(nil), confs[:7]...), true
+		}
+	}
+	return "", nil, false
+}
+
+func rerankTailI1Candidate(r []rune, confs []float32) (string, []float32, bool) {
+	if len(r) != 7 || len(confs) != 7 || !looksLikeMainlandPlatePrefix(r) {
+		return "", nil, false
+	}
+	// Only touch ambiguous low-confidence pattern "...I1".
+	if unicode.ToUpper(r[5]) != 'I' || !unicode.IsDigit(r[6]) {
+		return "", nil, false
+	}
+	if confs[5] >= 0.84 || confs[6] >= 0.84 {
+		return "", nil, false
+	}
+	bestPlate := ""
+	bestConfs := []float32(nil)
+	bestScore := float32(-1e9)
+	repl5 := []rune{'H', 'L', '1'}
+	repl6 := []rune{'L', '1', '7'}
+	for _, c5 := range repl5 {
+		for _, c6 := range repl6 {
+			// keep candidate alnum-valid for mainland suffix.
+			if !(isASCIILetter(c5) || unicode.IsDigit(c5)) || !(isASCIILetter(c6) || unicode.IsDigit(c6)) {
+				continue
+			}
+			cand := append([]rune(nil), r...)
+			cand[5] = c5
+			cand[6] = c6
+			candConfs := append([]float32(nil), confs...)
+			if candConfs[5] < 0.72 {
+				candConfs[5] = 0.72
+			}
+			if candConfs[6] < 0.70 {
+				candConfs[6] = 0.70
+			}
+			score := scorePlateCandidate(string(cand), meanConfs(candConfs))
+			if score > bestScore {
+				bestScore = score
+				bestPlate = string(cand)
+				bestConfs = candConfs
+			}
+		}
+	}
+	if bestPlate == "" {
+		return "", nil, false
+	}
+	return bestPlate, bestConfs, true
 }
 
 func ambiguousLettersForDigit(d rune) []rune {
