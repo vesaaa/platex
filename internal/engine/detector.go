@@ -39,8 +39,33 @@ func NewDetector(modelPath string, threads, optLevel int, cfg config.DetectionCo
 	}, nil
 }
 
+// PlateDetection is a single detection result with optional 4-corner keypoints.
+type PlateDetection struct {
+	Box       [4]int
+	Score     float32
+	HasKeys   bool
+	Keypoints PlateKeypoints
+}
+
 // Detect returns detected plate boxes as [x1,y1,x2,y2] on the original image.
+// It is kept for backward compatibility with code paths that don't need
+// keypoints; new code should prefer DetectPlates.
 func (d *Detector) Detect(img image.Image) ([][4]int, error) {
+	dets, err := d.DetectPlates(img)
+	if err != nil {
+		return nil, err
+	}
+	out := make([][4]int, 0, len(dets))
+	for _, det := range dets {
+		out = append(out, det.Box)
+	}
+	return out, nil
+}
+
+// DetectPlates returns the full detection result including keypoints when the
+// detector head exposes them. Currently parses the y5fu_320x output layout
+// `[cx, cy, w, h, obj, kp1x, kp1y, kp2x, kp2y, kp3x, kp3y, kp4x, kp4y, cls...]`.
+func (d *Detector) DetectPlates(img image.Image) ([]PlateDetection, error) {
 	if d.model == nil {
 		return nil, fmt.Errorf("detector model not loaded")
 	}
@@ -61,13 +86,13 @@ func (d *Detector) Detect(img image.Image) ([][4]int, error) {
 		return nil, err
 	}
 
-	boxes := decodeYOLOLikeOutput(out, d.model.GetOutputShape(), d.confThr, d.iouThr, d.maxCand)
-	if len(boxes) == 0 {
-		return [][4]int{}, nil
+	rows := decodeDetectorRows(out, d.model.GetOutputShape(), d.confThr, d.iouThr, d.maxCand)
+	if len(rows) == 0 {
+		return []PlateDetection{}, nil
 	}
 
-	restored := make([][4]int, 0, len(boxes))
-	for _, b := range boxes {
+	restored := make([]PlateDetection, 0, len(rows))
+	for _, b := range rows {
 		x1 := int(math.Round((float64(b.x1)-padX)/scale)) + srcBounds.Min.X
 		y1 := int(math.Round((float64(b.y1)-padY)/scale)) + srcBounds.Min.Y
 		x2 := int(math.Round((float64(b.x2)-padX)/scale)) + srcBounds.Min.X
@@ -88,7 +113,24 @@ func (d *Detector) Detect(img image.Image) ([][4]int, error) {
 		if x2-x1 < 8 || y2-y1 < 8 {
 			continue
 		}
-		restored = append(restored, [4]int{x1, y1, x2, y2})
+
+		det := PlateDetection{
+			Box:   [4]int{x1, y1, x2, y2},
+			Score: b.score,
+		}
+		if b.hasKeys {
+			var raw [4][2]float64
+			for i := 0; i < 4; i++ {
+				kx := (float64(b.keys[i][0]) - padX) / scale
+				ky := (float64(b.keys[i][1]) - padY) / scale
+				kx += float64(srcBounds.Min.X)
+				ky += float64(srcBounds.Min.Y)
+				raw[i] = [2]float64{kx, ky}
+			}
+			det.Keypoints = orderPlateKeypoints(raw)
+			det.HasKeys = true
+		}
+		restored = append(restored, det)
 	}
 	return restored, nil
 }
@@ -101,9 +143,11 @@ func (d *Detector) Close() {
 }
 
 type detBox struct {
-	x1, y1 float32
-	x2, y2 float32
-	score  float32
+	x1, y1  float32
+	x2, y2  float32
+	score   float32
+	hasKeys bool
+	keys    [4][2]float32
 }
 
 func letterboxForDetector(img image.Image, width, height int) (image.Image, float64, float64, float64) {
@@ -155,7 +199,16 @@ func imageToTensorDetector(img image.Image) []float32 {
 	return tensor
 }
 
-func decodeYOLOLikeOutput(output []float32, shape []int64, confThr, iouThr float32, maxCandidates int) []detBox {
+// decodeDetectorRows parses the detector head into [detBox] entries while
+// preserving keypoint information when the head includes them. It supports
+// two common layouts:
+//
+//   - 6-column classic YOLO: [cx, cy, w, h, obj, cls0]
+//   - 15-column yolov5face: [cx, cy, w, h, obj, kp1x, kp1y, kp2x, kp2y,
+//     kp3x, kp3y, kp4x, kp4y, cls0, cls1]
+//
+// keypointHead is auto-detected when numCols >= 13.
+func decodeDetectorRows(output []float32, shape []int64, confThr, iouThr float32, maxCandidates int) []detBox {
 	if len(output) < 6 {
 		return nil
 	}
@@ -178,6 +231,8 @@ func decodeYOLOLikeOutput(output []float32, shape []int64, confThr, iouThr float
 		return nil
 	}
 
+	hasKeypoints := numCols >= 13
+
 	boxes := make([]detBox, 0, numRows)
 	for i := 0; i < numRows; i++ {
 		base := i * numCols
@@ -190,14 +245,20 @@ func decodeYOLOLikeOutput(output []float32, shape []int64, confThr, iouThr float
 			continue
 		}
 
-		bestCls := float32(1.0)
-		if numCols > 5 {
-			bestCls = float32(0.0)
-			for c := 5; c < numCols; c++ {
+		// Class confidence: skip the keypoint span when present.
+		bestCls := float32(0.0)
+		clsStart := 5
+		if hasKeypoints {
+			clsStart = 13
+		}
+		if numCols > clsStart {
+			for c := clsStart; c < numCols; c++ {
 				if output[base+c] > bestCls {
 					bestCls = output[base+c]
 				}
 			}
+		} else {
+			bestCls = 1.0
 		}
 		score := obj * bestCls
 		if score < confThr {
@@ -210,7 +271,15 @@ func decodeYOLOLikeOutput(output []float32, shape []int64, confThr, iouThr float
 		if x2 <= x1 || y2 <= y1 {
 			continue
 		}
-		boxes = append(boxes, detBox{x1: x1, y1: y1, x2: x2, y2: y2, score: score})
+		row := detBox{x1: x1, y1: y1, x2: x2, y2: y2, score: score}
+		if hasKeypoints {
+			row.hasKeys = true
+			for k := 0; k < 4; k++ {
+				row.keys[k][0] = output[base+5+2*k]
+				row.keys[k][1] = output[base+5+2*k+1]
+			}
+		}
+		boxes = append(boxes, row)
 	}
 
 	if len(boxes) == 0 {

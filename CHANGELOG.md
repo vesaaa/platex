@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.6.15
+
+- Major accuracy lever: parse the 4 plate corner keypoints emitted by the detector
+  (yolov5face-style 15-column head) and apply a 4-point perspective warp before
+  recognizer inference, fixing the long-standing tilt/perspective failure class.
+- Implement pure-Go homography solver and bilinear-sampling warp without
+  introducing any new C/C++ dependency.
+- Two-tier full-mode pipeline:
+  - high-confidence detection (score >= 0.65) uses a single warp-only recognition
+    short-circuit to keep the path inexpensive
+  - lower-confidence cases run both warp and axis-aligned crop, picking the best
+    candidate by structural score
+- Add tests covering homography correctness, warp orientation, keypoint ordering,
+  and degenerate-quad rejection.
+- Benchmark on 1000-image test set under the dual gate
+  (must not regress on accuracy or QPS):
+  - pass rate: `92.2%` -> `92.7%` (+0.5pt), 6 tilted/perspective samples recovered
+  - QPS: stays in baseline `~56` band
+- Document model architecture for future iterations:
+  - recognizer: PaddleOCR PP-OCR v3 SVTR-LCNet, fixed `1x3x48x160` input,
+    `1x20x78` output (CTC) — wider input to grow timesteps is not an option
+    without retraining
+  - detector: yolov5face-style head exposes 4-corner keypoints in columns 5..12
+  - color model: actual input is `96x96` and output has 3 classes — current code
+    passes `96x24` and assumes 6 classes (kept on heuristic fallback for now;
+    fix scheduled for the next iteration)
+
 ## v0.6.14
 
 - Keep the best current baseline under the dual gate (accuracy must not drop, speed must not regress):

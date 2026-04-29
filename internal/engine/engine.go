@@ -358,11 +358,11 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 		}
 	}
 
-	boxes, err := e.detector.Detect(img)
+	dets, err := e.detector.DetectPlates(img)
 	if err != nil {
 		return nil, fmt.Errorf("detect: %w", err)
 	}
-	if len(boxes) == 0 {
+	if len(dets) == 0 {
 		if direct != nil {
 			return []types.PlateResult{*direct}, nil
 		}
@@ -370,14 +370,14 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 	}
 
 	maxPlates := resolveMaxPlatesByMode(e.config.Rec.MaxPlates, e.config.Rec.FullMaxPlates, "full", opts)
-	filtered := make([][4]int, 0, len(boxes))
-	for _, b := range boxes {
-		if isLikelyPlateBox(img.Bounds(), b) {
-			filtered = append(filtered, b)
+	filtered := make([]PlateDetection, 0, len(dets))
+	for _, det := range dets {
+		if isLikelyPlateBox(img.Bounds(), det.Box) {
+			filtered = append(filtered, det)
 		}
 	}
 	if len(filtered) == 0 {
-		filtered = boxes
+		filtered = dets
 	}
 	if len(filtered) > maxPlates {
 		filtered = filtered[:maxPlates]
@@ -387,19 +387,18 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 	sem := make(chan struct{}, workers)
 	ordered := make([]*types.PlateResult, len(filtered))
 	var wg sync.WaitGroup
-	for i, b := range filtered {
+	for i, det := range filtered {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(idx int, box [4]int) {
+		go func(idx int, d PlateDetection) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			crop := cropImage(img, box[0], box[1], box[2], box[3])
-			plate, recErr := e.recognizeSingle(crop, resizeMode)
-			if recErr != nil || plate == nil {
+			plate := e.recognizePlateRegion(img, d, resizeMode)
+			if plate == nil {
 				return
 			}
 			ordered[idx] = plate
-		}(i, b)
+		}(i, det)
 	}
 	wg.Wait()
 
@@ -553,6 +552,77 @@ func shouldUseCropByAspect(img image.Image) bool {
 	minRatio := plateAspectRatioTarget * (1.0 - plateAspectRatioTolerance)
 	maxRatio := plateAspectRatioTarget * (1.0 + plateAspectRatioTolerance)
 	return ratio >= minRatio && ratio <= maxRatio
+}
+
+// recognizePlateRegion produces a recognition for a single detected plate.
+// When the detector exposed 4 keypoints with a confident score, it warps the
+// quadrilateral into a canonical 168x48 plate canvas and prefers the warped
+// recognition over the axis-aligned crop. This is the most effective single
+// lever to fix tilted/perspective-distorted plates in full mode.
+const (
+	plateWarpOutW       = 168
+	plateWarpOutH       = 48
+	plateWarpScoreFloor = float32(0.30)
+	plateWarpFastFloor  = float32(0.65)
+	plateWarpAcceptDiff = float32(0.02)
+)
+
+func (e *Engine) recognizePlateRegion(img image.Image, det PlateDetection, resizeMode string) *types.PlateResult {
+	box := det.Box
+	useWarp := det.HasKeys && det.Score >= plateWarpScoreFloor && keypointsValid(det.Keypoints, 6.0)
+
+	// Fast path: high-confidence keypoints alone are reliable; skip the crop
+	// inference entirely to save a recognizer call. We only second-guess this
+	// when the warped result itself looks weak.
+	if useWarp && det.Score >= plateWarpFastFloor {
+		warped := warpPerspectivePlate(img, det.Keypoints, plateWarpOutW, plateWarpOutH)
+		warpPlate, _ := e.recognizeSingle(warped, resizeMode)
+		if warpPlate != nil && isAcceptableWarpResult(*warpPlate) {
+			return warpPlate
+		}
+	}
+
+	cropImg := cropImage(img, box[0], box[1], box[2], box[3])
+	cropPlate, _ := e.recognizeSingle(cropImg, resizeMode)
+
+	if !useWarp {
+		return cropPlate
+	}
+
+	warped := warpPerspectivePlate(img, det.Keypoints, plateWarpOutW, plateWarpOutH)
+	warpPlate, _ := e.recognizeSingle(warped, resizeMode)
+	if warpPlate == nil {
+		return cropPlate
+	}
+	if cropPlate == nil {
+		return warpPlate
+	}
+	// Pick the better candidate by structure-aware score; the warp path also
+	// gets a small constant bonus because it tends to be far cleaner for the
+	// recognizer once distortion is removed.
+	cropScore := scorePlateCandidate(cropPlate.PlateNumber, cropPlate.Confidence)
+	warpScore := scorePlateCandidate(warpPlate.PlateNumber, warpPlate.Confidence) + 1.0
+	if warpPlate.Confidence > cropPlate.Confidence+plateWarpAcceptDiff || warpScore > cropScore {
+		return warpPlate
+	}
+	return cropPlate
+}
+
+// isAcceptableWarpResult is the gate for trusting a warp-only recognition. We
+// require a structurally valid mainland prefix and a healthy confidence so that
+// we only short-circuit when the result is clearly stable.
+func isAcceptableWarpResult(p types.PlateResult) bool {
+	if p.Type == types.PlateTypeUnknown {
+		return false
+	}
+	if p.Confidence < 0.85 {
+		return false
+	}
+	r := []rune(strings.TrimSpace(p.PlateNumber))
+	if len(r) != 7 && len(r) != 8 {
+		return false
+	}
+	return looksLikeMainlandPlatePrefix(r)
 }
 
 func (e *Engine) retryCropWithTweaks(img image.Image, resizeMode string) *types.PlateResult {

@@ -68,7 +68,7 @@ func TestDecodeYOLOLikeOutputAndNMS(t *testing.T) {
 		220, 120, 60, 24, 0.95, 0.9, // distant box B, should be kept
 	}
 
-	boxes := decodeYOLOLikeOutput(output, shape, 0.30, 0.45, 10)
+	boxes := decodeDetectorRows(output, shape, 0.30, 0.45, 10)
 	if len(boxes) != 2 {
 		t.Fatalf("decodeYOLOLikeOutput() len=%d, want=2", len(boxes))
 	}
@@ -87,7 +87,7 @@ func TestDecodeYOLOLikeOutputRespectsMaxCandidates(t *testing.T) {
 		300, 100, 30, 10, 0.7, 0.9,
 	}
 
-	boxes := decodeYOLOLikeOutput(output, shape, 0.2, 0.9, 2)
+	boxes := decodeDetectorRows(output, shape, 0.2, 0.9, 2)
 	if len(boxes) != 2 {
 		t.Fatalf("decodeYOLOLikeOutput() len=%d, want=2", len(boxes))
 	}
