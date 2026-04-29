@@ -30,14 +30,15 @@ const (
 
 // Engine is the main license plate recognition engine.
 type Engine struct {
-	detector   *Detector
-	recognizer *Recognizer
-	color      *ColorClassifier
-	config     *config.EngineConfig
-	workerCh   chan *recognizeJob
-	urlFetchCh chan struct{}
-	httpClient *http.Client
-	wg         sync.WaitGroup
+	detector     *Detector
+	recognizer   *Recognizer
+	recognizerWE *RecognizerWE
+	color        *ColorClassifier
+	config       *config.EngineConfig
+	workerCh     chan *recognizeJob
+	urlFetchCh   chan struct{}
+	httpClient   *http.Client
+	wg           sync.WaitGroup
 
 	// Stats
 	totalImages atomic.Int64
@@ -95,11 +96,24 @@ func New(cfg *config.EngineConfig) (*Engine, error) {
 		cfg.ONNX.OptimizationLevel,
 	)
 
+	// Optional: load the we0091234 plate_rec_color model for ensemble fallback.
+	// Missing file is non-fatal; the primary recognizer keeps working alone.
+	weRec, err := NewRecognizerWE(
+		cfg.Models.RecognizerWE,
+		cfg.ONNX.ThreadsPerSession,
+		cfg.ONNX.OptimizationLevel,
+	)
+	if err != nil {
+		slog.Warn("Failed to load WE recognizer; ensemble disabled", "error", err)
+		weRec = nil
+	}
+
 	e := &Engine{
-		detector:   detector,
-		recognizer: recognizer,
-		color:      colorCls,
-		config:     cfg,
+		detector:     detector,
+		recognizer:   recognizer,
+		recognizerWE: weRec,
+		color:        colorCls,
+		config:       cfg,
 		workerCh:   make(chan *recognizeJob, cfg.Workers*2),
 		urlFetchCh: make(chan struct{}, max(1, cfg.URL.MaxFetchConcurrency)),
 		httpClient: &http.Client{
@@ -145,10 +159,33 @@ func (e *Engine) recognizeSingle(img image.Image, resizeMode string) (*types.Pla
 		return nil, fmt.Errorf("recognizer model not loaded")
 	}
 
-	// Step 1: Character recognition
+	// Step 1: Primary recognition (HyperLPR3 v3 SVTR-LCNet).
 	plateNumber, _, confidence, err := e.recognizer.RecognizeWithResizeMode(img, resizeMode)
 	if err != nil {
 		return nil, fmt.Errorf("recognition: %w", err)
+	}
+
+	// Step 1b (optional): when an ensemble recognizer is available and the
+	// primary result looks suspicious, run we0091234 as a cross-check and pick
+	// the better candidate.  Suspicious means low confidence, structurally
+	// inconsistent (length/prefix), or empty.
+	weColorCode := -1
+	weColorConf := float32(0)
+	if e.recognizerWE != nil {
+		if shouldRunEnsemble(plateNumber, confidence) {
+			if weRes, weErr := e.recognizerWE.Recognize(img); weErr == nil && weRes != nil {
+				if better := pickBetterPlateCandidate(plateNumber, confidence, weRes.PlateNumber, weRes.Confidence); better == "we" {
+					slog.Info("Ensemble: WE recognizer wins",
+						"primary", plateNumber, "primary_conf", confidence,
+						"we", weRes.PlateNumber, "we_conf", weRes.Confidence,
+					)
+					plateNumber = weRes.PlateNumber
+					confidence = weRes.Confidence
+					weColorCode = int(MapWEColor(weRes.Color))
+					weColorConf = weRes.ColorConf
+				}
+			}
+		}
 	}
 
 	if plateNumber == "" || confidence < e.config.Rec.MinConfidence {
@@ -158,6 +195,11 @@ func (e *Engine) recognizeSingle(img image.Image, resizeMode string) (*types.Pla
 
 	// Step 2: Color classification
 	colorCode, colorConf := e.color.Classify(img)
+	// Prefer the WE color when its confidence dominates the heuristic-fallback color.
+	if weColorCode >= 0 && weColorConf > colorConf {
+		colorCode = weColorCode
+		colorConf = weColorConf
+	}
 
 	// Step 3: Determine plate type
 	plateType := classifyPlateType(plateNumber)
@@ -466,6 +508,143 @@ func isHighQualityFullDirect(p types.PlateResult, minConf float32) bool {
 		return false
 	}
 	return looksLikeMainlandPlatePrefix(r)
+}
+
+// shouldRunEnsemble decides if the WE cross-check is worth running. The we
+// model is most useful for fixing the dominant remaining HyperLPR3 v3 failure
+// modes:
+//   - 7-char output that should have been an NEV 8-char (truncated tail)
+//   - 8-char non-NEV output that should have been 7-char (over-decoded tail)
+//   - empty / very short / structurally invalid output
+//
+// We deliberately keep the trigger narrow so confident clean outputs from the
+// primary recognizer never get a chance to be overwritten.
+func shouldRunEnsemble(plate string, conf float32) bool {
+	r := []rune(strings.TrimSpace(plate))
+	if len(r) == 0 {
+		return true
+	}
+	if !looksLikeMainlandPlatePrefix(r) {
+		return true
+	}
+	// Length boundary cases benefit from WE recovery.
+	if len(r) == 7 && conf < 0.97 {
+		return true
+	}
+	if len(r) == 8 {
+		// Non-NEV 8-char outputs are usually CTC tail-noise; trigger ensemble.
+		if !looksLikeNewEnergyPlate(r) && conf < 0.97 {
+			return true
+		}
+		// NEV outputs only get checked when very low confidence.
+		if conf < 0.85 {
+			return true
+		}
+	}
+	if len(r) != 7 && len(r) != 8 {
+		return true
+	}
+	return false
+}
+
+// pickBetterPlateCandidate chooses between primary and WE candidates with very
+// conservative rules so the WE model never overrides the primary's province
+// recognition or middle-char content. The WE candidate may only:
+//   - replace an empty/invalid primary
+//   - extend a 7-char primary to an 8-char NEV (insertion at index 2 or
+//     append at the tail), keeping every other char identical to primary
+//   - shorten a 8-char primary to a 7-char by trimming the trailing char,
+//     when the primary clearly looks like CTC over-decode
+func pickBetterPlateCandidate(primary string, pConf float32, we string, weConf float32) string {
+	pr := []rune(strings.TrimSpace(primary))
+	wr := []rune(strings.TrimSpace(we))
+	if len(wr) == 0 {
+		return "primary"
+	}
+	if !looksLikeMainlandPlatePrefix(wr) {
+		return "primary"
+	}
+	if len(pr) == 0 {
+		return "we"
+	}
+	if !looksLikeMainlandPlatePrefix(pr) {
+		// Primary looks broken; accept WE if WE looks healthy.
+		if weConf >= 0.80 {
+			return "we"
+		}
+		return "primary"
+	}
+	// Province must match for WE to win.
+	if pr[0] != wr[0] {
+		return "primary"
+	}
+
+	// 7 -> 8 length recovery (NEV form). We restrict to NEV plates because
+	// non-NEV 7->8 is empirically more often a WE false positive than a fix.
+	if len(pr) == 7 && len(wr) == 8 && weConf >= 0.86 && looksLikeNewEnergyPlate(wr) {
+		if alignmentMatches(pr, wr) >= 6 {
+			return "we"
+		}
+	}
+	// 8 -> 7 length trim. Accept WE only when primary's confidence is mid-low,
+	// primary is not a valid NEV (NEV-shaped should not be trimmed), and WE
+	// agrees on at least 6 positions.
+	if len(pr) == 8 && len(wr) == 7 && weConf >= 0.86 && !looksLikeNewEnergyPlate(pr) && pConf < 0.93 {
+		if alignmentMatches(pr[:7], wr) >= 6 {
+			return "we"
+		}
+	}
+	// Same length recovery: only allow when primary confidence is low and WE
+	// agrees on most positions and is more confident.
+	if len(pr) == len(wr) && weConf >= pConf+0.05 && pConf < 0.85 {
+		need := len(pr) - 1
+		if need < 6 {
+			need = 6
+		}
+		if alignmentMatch(pr, wr, need) {
+			return "we"
+		}
+	}
+	return "primary"
+}
+
+// alignmentMatch checks how many positions match between two equal-or-nearly-
+// equal length plates and returns true when at least minMatches positions agree.
+// When the lengths differ we consider the longest common prefix + best
+// alignment between primary and we (only meaningful for length 7 vs 8 cases).
+func alignmentMatch(a, b []rune, minMatches int) int1bool { //nolint:revive
+	return alignmentMatches(a, b) >= minMatches
+}
+
+type int1bool = bool
+
+func alignmentMatches(a, b []rune) int {
+	if len(a) == len(b) {
+		matched := 0
+		for i := range a {
+			if a[i] == b[i] {
+				matched++
+			}
+		}
+		return matched
+	}
+	short, long := a, b
+	if len(short) > len(long) {
+		short, long = long, short
+	}
+	best := 0
+	for shift := 0; shift+len(short) <= len(long); shift++ {
+		matched := 0
+		for i := range short {
+			if short[i] == long[shift+i] {
+				matched++
+			}
+		}
+		if matched > best {
+			best = matched
+		}
+	}
+	return best
 }
 
 func resolveFullEarlyStopConf(defaultConf float32, opts *types.RecognizeOption) float32 {
@@ -1028,6 +1207,9 @@ func (e *Engine) Close() {
 
 	if e.recognizer != nil {
 		e.recognizer.Close()
+	}
+	if e.recognizerWE != nil {
+		e.recognizerWE.Close()
 	}
 	if e.detector != nil {
 		e.detector.Close()

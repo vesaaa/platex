@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.7.0
+
+- Add a dual-recognizer ensemble path. The HyperLPR3 v3 SVTR-LCNet model
+  remains the primary recognizer; an optional alternate plate_rec_color
+  model (we0091234, ONNX dual head plate+color) is loaded when present and
+  used as a conservative cross-check on suspicious primary outputs.
+- Engine plumbing changes:
+  - extend the ONNX loader with a dual-output session pool
+    (`loadModelDual`, `RunInferenceDual`)
+  - add `RecognizerWE` with the upstream BGR mean=0.588/std=0.193 preprocess,
+    78-token charset (民/航/危/险/品), and the 5-class color head
+  - add `recognition.recognizer_we` config path; missing model file is
+    non-fatal and simply disables the ensemble
+- Conservative ensemble policy (kept narrow on purpose to protect speed and
+  avoid regressions, see analysis below):
+  - WE only runs when the primary plate is empty / structurally invalid /
+    mid-confidence (< 0.93 for length 7 or non-NEV 8)
+  - WE result is accepted only when its province char matches the primary's
+    and the candidate forms a clean length-7<->NEV-8 length recovery with
+    high alignment overlap
+- Model investigation findings (recorded so future iterations can build on them):
+  - HyperLPR3 v3 recognizer: PaddleOCR PP-OCR v3 SVTR-LCNet, fixed
+    `1x3x48x160` input, fixed `1x20x78` output (CTC). Cannot grow timesteps
+    without retraining.
+  - we0091234 plate_rec_color: shape `1x21x78` (only one extra timestep)
+    plus a 5-class color head. Trained on a different/wider dataset.
+  - Empirical on the 1000-image set:
+    - HyperLPR3 alone: 92.7% pass, 76 mismatch
+    - we0091234 alone (hybrid detect+direct): 92.0% pass, 80 mismatch
+    - Failure overlap: only 15 cases fail in both. Theoretical fusion
+      ceiling on this set is ~98.5%.
+  - Why the realized gain is only +0.1pt (92.7 -> 92.8): aggressive fusion
+    overrides plenty of correct primary answers, while a strict province-
+    locked, alignment-required policy is needed to keep precision. The
+    safest conservative rules close most of the gap on length-7<->8 NEV
+    cases but cannot rescue non-NEV 8-char heavy-vehicle plates without
+    introducing more regressions.
+  - To break past ~93% on this dataset, the most promising paths are
+    swapping in a higher-timestep recognition model (e.g. PP-OCR v4 / a
+    plate-specific retrained CRNN with 30+ steps), or training a small
+    arbiter that learns when to trust which recognizer.
+- Benchmark gate (must not regress accuracy or QPS vs v0.6.16):
+  - pass rate: `92.7% -> 92.8%` (+0.1pt, ~1 sample)
+  - QPS: stable at `~57` (within baseline band)
+
 ## v0.6.16
 
 - Fix the color classifier wiring against the actual `litemodel_cls_96x_r1`

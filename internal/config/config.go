@@ -39,9 +39,10 @@ type EngineConfig struct {
 
 // ModelsConfig holds model file paths.
 type ModelsConfig struct {
-	Recognizer string `yaml:"recognizer"`
-	Detector   string `yaml:"detector"`
-	Color      string `yaml:"color"`
+	Recognizer   string `yaml:"recognizer"`
+	Detector     string `yaml:"detector"`
+	Color        string `yaml:"color"`
+	RecognizerWE string `yaml:"recognizer_we"`
 }
 
 // ONNXConfig holds ONNX Runtime settings.
@@ -105,9 +106,10 @@ func DefaultConfig() *Config {
 			Workers:         workers,
 			SubmitTimeoutMs: 300,
 			Models: ModelsConfig{
-				Recognizer: "models/plate_rec.onnx",
-				Detector:   "models/plate_detect.onnx",
-				Color:      "models/plate_color.onnx",
+				Recognizer:   "models/plate_rec.onnx",
+				Detector:     "models/plate_detect.onnx",
+				Color:        "models/plate_color.onnx",
+				RecognizerWE: "models/plate_rec_color.onnx",
 			},
 			ONNX: ONNXConfig{
 				ThreadsPerSession: 1,

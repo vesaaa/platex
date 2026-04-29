@@ -37,3 +37,6 @@ c_api_*.h
 
 # Local exploration scripts (kept out of release)
 tools/
+
+# Optional alternate ONNX models, baked into Docker images at build time
+models_v2/

@@ -28,6 +28,12 @@ COPY --from=builder /app/build/linux-amd64/libonnxruntime.so* /app/
 # This ensures the image comes with the models out-of-the-box.
 RUN chmod +x /app/lpr-server && /app/lpr-server -download
 
+# Optional: ship the we0091234 plate_rec_color ensemble recognizer when the
+# build context provides it (models_v2/ directory). The engine treats the
+# missing case gracefully by skipping the ensemble path. Using a wildcard
+# pattern keeps the build from failing when the directory is absent.
+COPY --from=builder /app/models_v2/* /app/models/
+
 # Expose API port
 EXPOSE 8080
 
