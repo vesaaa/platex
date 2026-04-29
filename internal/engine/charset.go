@@ -16,12 +16,11 @@ var plateChars = []string{
 	"领", "使", "澳", // 74-76
 }
 
-// plateColorLabels maps model output index to color code.
+// plateColorLabels maps the 3-class HyperLPR3 v3 color head to our internal
+// color codes. The model emits class probabilities for [blue, green, yellow]
+// in this order (validated against litemodel_cls_96x_r1).
 var plateColorLabels = []int{
 	3, // Blue (Model output 0 -> ColorBlue 3)
-	4, // Yellow (Model output 1 -> ColorYellow 4)
-	5, // Green (Model output 2 -> ColorGreen 5)
-	2, // Black (Model output 3 -> ColorBlack 2)
-	1, // White (Model output 4 -> ColorWhite 1)
-	0, // Other (Model output 5 -> ColorOther 0)
+	5, // Green (Model output 1 -> ColorGreen 5)
+	4, // Yellow (Model output 2 -> ColorYellow 4)
 }

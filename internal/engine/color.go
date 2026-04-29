@@ -28,10 +28,14 @@ func NewColorClassifier(modelPath string, threads, optLevel int) *ColorClassifie
 		return &ColorClassifier{useModel: false}
 	}
 
+	// HyperLPR3 v3 color model expects a square 96x96 RGB tensor and emits 3
+	// class probabilities (blue/green/yellow). The previous defaults (96x24,
+	// 6 labels) were a leftover from an older variant and silently disabled
+	// the model in practice.
 	return &ColorClassifier{
 		model:       model,
 		inputWidth:  96,
-		inputHeight: 24,
+		inputHeight: 96,
 		useModel:    true,
 	}
 }

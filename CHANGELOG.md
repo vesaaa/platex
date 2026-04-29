@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.6.16
+
+- Fix the color classifier wiring against the actual `litemodel_cls_96x_r1`
+  HyperLPR3 v3 model: input tensor is `1x3x96x96` (was passed as `96x24`) and
+  the head emits 3 classes in order `[blue, green, yellow]` (was assumed to
+  be 6 classes). Until now the color model was effectively idle and we relied
+  on the heuristic fallback alone.
+- Loosen the trigger for the expanded-keypoint warp recovery in full mode:
+  any 7-char or non-NEV 8-char primary result now gets one extra warp with
+  horizontally widened/narrowed keypoints, gated by a candidate-score margin
+  of `+0.6` instead of `+1.0`. This is the second cheap attempt at the
+  dominant remaining failure class (length 7<->8 drift) without introducing
+  a third recognizer call.
+- Benchmark on 1000-image set vs `v0.6.15`:
+  - pass rate: stable at `92.7%`
+  - QPS: stable around `~57-58`
+- Honest accuracy ceiling analysis (kept in code/changelog so that future
+  iterations don't repeat the same dead ends):
+  - Recognizer is fixed PP-OCR v3 SVTR-LCNet with `1x3x48x160` input and
+    `1x20x78` output. With only `20` CTC timesteps for up to 8 characters,
+    the model is structurally fragile when the warped plate width does not
+    cover the rightmost NEV digit, or includes extra plate-frame strokes
+    that get decoded into a phantom trailing character. No amount of
+    post-processing can guarantee fixing both directions of this drift.
+  - Detector keypoints are accurate on most tilted samples (validated:
+    perspective warp recovers ~6 hard cases) but their right edge is not
+    reliable for tightly framed NEV plates.
+  - Empirically observed pure-algorithm ceiling on this 1000-image dataset:
+    `~93%`. Closing the remaining gap requires one of:
+      * upgrading to a higher-timestep recognizer (e.g. PP-OCR v4) or a
+        plate-specific retrained model
+      * precise character-edge refinement in pixel space (vertical projection
+        on the warped image to trim plate frame artifacts)
+      * a small auxiliary model that classifies "7-char vs NEV 8-char" from
+        the warped crop to gate length recovery deterministically
+
 ## v0.6.15
 
 - Major accuracy lever: parse the 4 plate corner keypoints emitted by the detector

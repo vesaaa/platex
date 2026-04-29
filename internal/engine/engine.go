@@ -580,6 +580,16 @@ func (e *Engine) recognizePlateRegion(img image.Image, det PlateDetection, resiz
 		if warpPlate != nil && isAcceptableWarpResult(*warpPlate) {
 			return warpPlate
 		}
+		// Length-boundary recovery: when the primary warp result looks weakly
+		// classified (especially 7<->8 char drift, the dominant remaining
+		// failure mode), try one extra warp with horizontally expanded
+		// keypoints. The extra inference is gated to avoid throughput hits.
+		if warpPlate != nil {
+			if alt := e.tryExpandedKeypointWarp(img, det, *warpPlate, resizeMode); alt != nil {
+				return alt
+			}
+			return warpPlate
+		}
 	}
 
 	cropImg := cropImage(img, box[0], box[1], box[2], box[3])
@@ -606,6 +616,79 @@ func (e *Engine) recognizePlateRegion(img image.Image, det PlateDetection, resiz
 		return warpPlate
 	}
 	return cropPlate
+}
+
+// tryExpandedKeypointWarp performs at most one extra recognizer inference with
+// horizontally widened keypoints. The expansion direction is chosen by the
+// length-mismatch hypothesis on the primary warp result:
+//
+//   - 7 chars with weak tail confidence -> expected NEV 8: pull right edge out
+//   - 8 chars with weak last-char and not NEV-shape -> tail noise: pull right edge in
+//
+// Anything else returns nil to keep the fast path cheap.
+func (e *Engine) tryExpandedKeypointWarp(img image.Image, det PlateDetection, base types.PlateResult, resizeMode string) *types.PlateResult {
+	r := []rune(strings.TrimSpace(base.PlateNumber))
+	if len(r) != 7 && len(r) != 8 {
+		return nil
+	}
+	if !looksLikeMainlandPlatePrefix(r) {
+		return nil
+	}
+	expand := 0.0
+	switch len(r) {
+	case 7:
+		// Likely truncated NEV (8-char) when ends with digits and last char is unstable.
+		// Trigger more eagerly: detector boxes on plate-like crops often clip
+		// the rightmost NEV character even at high recognition confidence.
+		expand = 0.10
+	case 8:
+		if looksLikeNewEnergyPlate(r) {
+			return nil
+		}
+		expand = -0.06
+	}
+	if expand == 0 {
+		return nil
+	}
+	kp := expandKeypointsHorizontally(det.Keypoints, expand)
+	if !keypointsValid(kp, 6.0) {
+		return nil
+	}
+	warped := warpPerspectivePlate(img, kp, plateWarpOutW, plateWarpOutH)
+	cand, _ := e.recognizeSingle(warped, resizeMode)
+	if cand == nil {
+		return nil
+	}
+	baseScore := scorePlateCandidate(base.PlateNumber, base.Confidence)
+	candScore := scorePlateCandidate(cand.PlateNumber, cand.Confidence)
+	// Accept the alternate warp when its candidate score (which already encodes
+	// length/structural priors) clearly outranks the original. The +0.6 cushion
+	// keeps the original answer when both look comparable.
+	if candScore > baseScore+0.6 && cand.Confidence >= 0.80 {
+		return cand
+	}
+	return nil
+}
+
+// expandKeypointsHorizontally returns a new quad whose left/right edges are
+// pushed outward (positive ratio) or inward (negative ratio) along the local
+// horizontal axis defined by (TR-TL) and (BR-BL).
+func expandKeypointsHorizontally(kp PlateKeypoints, ratio float64) PlateKeypoints {
+	if ratio == 0 {
+		return kp
+	}
+	tl, tr, br, bl := kp[0], kp[1], kp[2], kp[3]
+	topDx := tr[0] - tl[0]
+	topDy := tr[1] - tl[1]
+	botDx := br[0] - bl[0]
+	botDy := br[1] - bl[1]
+	out := PlateKeypoints{
+		{tl[0] - topDx*ratio, tl[1] - topDy*ratio},
+		{tr[0] + topDx*ratio, tr[1] + topDy*ratio},
+		{br[0] + botDx*ratio, br[1] + botDy*ratio},
+		{bl[0] - botDx*ratio, bl[1] - botDy*ratio},
+	}
+	return out
 }
 
 // isAcceptableWarpResult is the gate for trusting a warp-only recognition. We
