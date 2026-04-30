@@ -70,7 +70,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value={{version}}-cpu
+            type=raw,value=${{ github.ref_name }}-cpu
             type=raw,value=cpu
 
       - name: Extract metadata for CUDA11 image
@@ -79,7 +79,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value={{version}}-cuda11
+            type=raw,value=${{ github.ref_name }}-cuda11
             type=raw,value=cuda11
 
       - name: Extract metadata for CUDA12 image
@@ -88,7 +88,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value={{version}}-cuda12
+            type=raw,value=${{ github.ref_name }}-cuda12
             type=raw,value=cuda12
 
       - name: Build and push CPU image
