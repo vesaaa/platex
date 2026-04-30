@@ -362,6 +362,11 @@ GPU 使用说明（Linux）：
 docker run -d -p 8080:8080 ghcr.io/vesaaa/platex:v0.5.43
 ```
 
+镜像标签约定（按发布版本自动生成）：
+- CPU：`ghcr.io/vesaaa/platex:vX.Y.Z-cpu` 与 `ghcr.io/vesaaa/platex:cpu`
+- CUDA11：`ghcr.io/vesaaa/platex:vX.Y.Z-cuda11` 与 `ghcr.io/vesaaa/platex:cuda11`
+- CUDA12：`ghcr.io/vesaaa/platex:vX.Y.Z-cuda12` 与 `ghcr.io/vesaaa/platex:cuda12`
+
 ### systemd 服务（裸机）
 
 ```bash

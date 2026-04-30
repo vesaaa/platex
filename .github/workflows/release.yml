@@ -64,16 +64,59 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
-        id: meta
+      - name: Extract metadata for CPU image
+        id: meta_cpu
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value={{version}}-cpu
+            type=raw,value=cpu
 
-      - name: Build and push Docker image
+      - name: Extract metadata for CUDA11 image
+        id: meta_cuda11
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value={{version}}-cuda11
+            type=raw,value=cuda11
+
+      - name: Extract metadata for CUDA12 image
+        id: meta_cuda12
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value={{version}}-cuda12
+            type=raw,value=cuda12
+
+      - name: Build and push CPU image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ORT_GPU_VARIANT=cpu
+          tags: ${{ steps.meta_cpu.outputs.tags }}
+          labels: ${{ steps.meta_cpu.outputs.labels }}
+
+      - name: Build and push CUDA11 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          build-args: |
+            ORT_GPU_VARIANT=cuda11
+          tags: ${{ steps.meta_cuda11.outputs.tags }}
+          labels: ${{ steps.meta_cuda11.outputs.labels }}
+
+      - name: Build and push CUDA12 image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          build-args: |
+            ORT_GPU_VARIANT=cuda12
+          tags: ${{ steps.meta_cuda12.outputs.tags }}
+          labels: ${{ steps.meta_cuda12.outputs.labels }}

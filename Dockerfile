@@ -17,7 +17,9 @@ WORKDIR /app
 #   docker build --build-arg WE_REC_MODEL_URL=https://.../plate_rec_color.onnx .
 ARG WE_REC_MODEL_URL="https://github.com/vesaaa/plateai/releases/download/v2026.4/plate_rec_color.onnx"
 ARG ORT_VERSION="1.18.1"
-ARG ORT_GPU_VERSION="1.20.1"
+ARG ORT_GPU_VARIANT="cuda12"
+ARG ORT_GPU11_VERSION="1.18.1"
+ARG ORT_GPU12_VERSION="1.20.1"
 
 # Install certificates and any required dependencies for ONNX C++ runtime
 RUN apt-get update && \
@@ -34,12 +36,24 @@ COPY scripts/entrypoint.sh /app/entrypoint.sh
 
 # Download CUDA-enabled ONNX Runtime so a single image supports both CPU/CUDA.
 RUN mkdir -p /app/ort/cuda && \
-    curl -fL --retry 3 --retry-delay 2 \
-      "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_GPU_VERSION}/onnxruntime-linux-x64-gpu-${ORT_GPU_VERSION}.tgz" \
-      -o /tmp/ort-gpu.tgz && \
-    tar -xzf /tmp/ort-gpu.tgz -C /tmp && \
-    cp /tmp/onnxruntime-linux-x64-gpu-${ORT_GPU_VERSION}/lib/libonnxruntime*.so* /app/ort/cuda/ && \
-    rm -rf /tmp/ort-gpu.tgz /tmp/onnxruntime-linux-x64-gpu-${ORT_GPU_VERSION}
+    if [ "$ORT_GPU_VARIANT" = "cpu" ]; then \
+      echo "CPU image selected: skip GPU runtime bundle"; \
+    else \
+      if [ "$ORT_GPU_VARIANT" = "cuda11" ]; then \
+        ORT_GPU_VERSION="$ORT_GPU11_VERSION"; \
+      elif [ "$ORT_GPU_VARIANT" = "cuda12" ]; then \
+        ORT_GPU_VERSION="$ORT_GPU12_VERSION"; \
+      else \
+        echo "Unsupported ORT_GPU_VARIANT: $ORT_GPU_VARIANT (expected cpu|cuda11|cuda12)" && exit 1; \
+      fi; \
+      echo "Downloading ONNX Runtime GPU package v${ORT_GPU_VERSION} (${ORT_GPU_VARIANT})"; \
+      curl -fL --retry 3 --retry-delay 2 \
+        "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_GPU_VERSION}/onnxruntime-linux-x64-gpu-${ORT_GPU_VERSION}.tgz" \
+        -o /tmp/ort-gpu.tgz && \
+      tar -xzf /tmp/ort-gpu.tgz -C /tmp && \
+      cp /tmp/onnxruntime-linux-x64-gpu-${ORT_GPU_VERSION}/lib/libonnxruntime*.so* /app/ort/cuda/ && \
+      rm -rf /tmp/ort-gpu.tgz /tmp/onnxruntime-linux-x64-gpu-${ORT_GPU_VERSION}; \
+    fi
 
 # Grant execution permission and run the automatic model download step during image build!
 # This ensures the image comes with the models out-of-the-box.
