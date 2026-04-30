@@ -188,6 +188,7 @@ GPU 使用说明（Linux）：
 - 如需启用 CUDA：设置 `PLATEX_ONNX_PROVIDER=cuda`，可选设置 `PLATEX_ONNX_CUDA_DEVICE_ID`。
 - 当前官方镜像为“单镜像双模式”：内置 CPU 与 CUDA 两套 ONNX Runtime，按环境变量切换。
 - 运行容器时请加 `--gpus all`；若请求 `cuda` 但未检测到 NVIDIA 设备，会自动回退到 `cpu` 并打印告警。
+- 镜像内 CUDA 路线默认使用较新的 ORT GPU 包（CUDA12 依赖），启动时会检查 `libonnxruntime_providers_cuda.so` 依赖是否齐全；缺失时自动回退 CPU。
 
 按容器内存规格的建议参数（CPU 充足、以吞吐优先）：
 - 8G 容器：
