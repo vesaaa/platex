@@ -186,7 +186,8 @@ Docker 场景可直接通过环境变量覆盖关键并发参数（无需改配�
 GPU 使用说明（Linux）：
 - 默认 `PLATEX_ONNX_PROVIDER=cpu`，不使用 GPU。
 - 如需启用 CUDA：设置 `PLATEX_ONNX_PROVIDER=cuda`，可选设置 `PLATEX_ONNX_CUDA_DEVICE_ID`。
-- 注意：需要 CUDA 版本的 ONNX Runtime 共享库及 NVIDIA 运行环境；若依赖不完整，服务启动会报错。
+- 当前官方镜像为“单镜像双模式”：内置 CPU 与 CUDA 两套 ONNX Runtime，按环境变量切换。
+- 运行容器时请加 `--gpus all`；若请求 `cuda` 但未检测到 NVIDIA 设备，会自动回退到 `cpu` 并打印告警。
 
 按容器内存规格的建议参数（CPU 充足、以吞吐优先）：
 - 8G 容器：
