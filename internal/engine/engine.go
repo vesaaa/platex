@@ -527,14 +527,17 @@ func shouldRunEnsemble(plate string, conf float32) bool {
 	if !looksLikeMainlandPlatePrefix(r) {
 		return true
 	}
-	if len(r) == 7 && conf < 0.97 {
+	// Slightly widen the WE cross-check band so incremental WE tuning can flip
+	// rare primary slips without per-plate string hacks (still guarded below).
+	const ensMaxPrimaryConf float32 = 0.993
+	if len(r) == 7 && conf < ensMaxPrimaryConf {
 		return true
 	}
 	if len(r) == 8 {
-		if !looksLikeNewEnergyPlate(r) && conf < 0.97 {
+		if !looksLikeNewEnergyPlate(r) && conf < ensMaxPrimaryConf {
 			return true
 		}
-		if conf < 0.85 {
+		if conf < 0.87 {
 			return true
 		}
 	}
@@ -589,6 +592,18 @@ func pickBetterPlateCandidate(primary string, pConf float32, we string, weConf f
 	if len(pr) == 8 && len(wr) == 7 && weConf >= 0.86 && !looksLikeNewEnergyPlate(pr) && pConf < 0.93 {
 		if alignmentMatches(pr[:7], wr) >= 6 {
 			return "we"
+		}
+	}
+
+	// Same length + same province: allow WE when outputs differ slightly but WE
+	// is clearly favored by confidence — enables trained WE corrections without
+	// hardcoding individual plate substitutions.
+	if len(pr) == len(wr) && (len(pr) == 7 || len(pr) == 8) {
+		matched := alignmentMatches(pr, wr)
+		if matched >= len(pr)-2 && matched < len(pr) {
+			if weConf >= 0.88 && weConf >= pConf+0.02 {
+				return "we"
+			}
 		}
 	}
 	return "primary"
