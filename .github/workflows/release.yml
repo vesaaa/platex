@@ -73,23 +73,24 @@ jobs:
             type=raw,value=${{ github.ref_name }}-cpu
             type=raw,value=cpu
 
-      - name: Extract metadata for CUDA11 image
-        id: meta_cuda11
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=raw,value=${{ github.ref_name }}-cuda11
-            type=raw,value=cuda11
-
-      - name: Extract metadata for CUDA12 image
-        id: meta_cuda12
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=raw,value=${{ github.ref_name }}-cuda12
-            type=raw,value=cuda12
+      # CUDA Docker builds disabled for faster CI during train/validate; restore before GPU release.
+      # - name: Extract metadata for CUDA11 image
+      #   id: meta_cuda11
+      #   uses: docker/metadata-action@v5
+      #   with:
+      #     images: ghcr.io/${{ github.repository }}
+      #     tags: |
+      #       type=raw,value=${{ github.ref_name }}-cuda11
+      #       type=raw,value=cuda11
+      #
+      # - name: Extract metadata for CUDA12 image
+      #   id: meta_cuda12
+      #   uses: docker/metadata-action@v5
+      #   with:
+      #     images: ghcr.io/${{ github.repository }}
+      #     tags: |
+      #       type=raw,value=${{ github.ref_name }}-cuda12
+      #       type=raw,value=cuda12
 
       - name: Build and push CPU image
         uses: docker/build-push-action@v5
@@ -101,22 +102,22 @@ jobs:
           tags: ${{ steps.meta_cpu.outputs.tags }}
           labels: ${{ steps.meta_cpu.outputs.labels }}
 
-      - name: Build and push CUDA11 image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          build-args: |
-            ORT_GPU_VARIANT=cuda11
-          tags: ${{ steps.meta_cuda11.outputs.tags }}
-          labels: ${{ steps.meta_cuda11.outputs.labels }}
-
-      - name: Build and push CUDA12 image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          build-args: |
-            ORT_GPU_VARIANT=cuda12
-          tags: ${{ steps.meta_cuda12.outputs.tags }}
-          labels: ${{ steps.meta_cuda12.outputs.labels }}
+      # - name: Build and push CUDA11 image
+      #   uses: docker/build-push-action@v5
+      #   with:
+      #     context: .
+      #     push: true
+      #     build-args: |
+      #       ORT_GPU_VARIANT=cuda11
+      #     tags: ${{ steps.meta_cuda11.outputs.tags }}
+      #     labels: ${{ steps.meta_cuda11.outputs.labels }}
+      #
+      # - name: Build and push CUDA12 image
+      #   uses: docker/build-push-action@v5
+      #   with:
+      #     context: .
+      #     push: true
+      #     build-args: |
+      #       ORT_GPU_VARIANT=cuda12
+      #     tags: ${{ steps.meta_cuda12.outputs.tags }}
+      #     labels: ${{ steps.meta_cuda12.outputs.labels }}
