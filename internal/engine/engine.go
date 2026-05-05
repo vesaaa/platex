@@ -612,14 +612,12 @@ func pickBetterPlateCandidate(primary string, pConf float32, we string, weConf f
 	}
 
 	// Same length + same province: allow WE when outputs differ slightly but WE
-	// is favored by confidence — enables trained WE corrections without
-	// hardcoding individual plate substitutions. Relaxed from weConf>=0.88 /
-	// pConf+0.02 based on 20w error analysis: many 1-2 char errors where WE
-	// is slightly better but was blocked by tight thresholds.
+	// is clearly favored by confidence — enables trained WE corrections without
+	// hardcoding individual plate substitutions.
 	if len(pr) == len(wr) && (len(pr) == 7 || len(pr) == 8) {
 		matched := alignmentMatches(pr, wr)
 		if matched >= len(pr)-2 && matched < len(pr) {
-			if weConf >= 0.85 && weConf >= pConf-0.01 {
+			if weConf >= 0.88 && weConf >= pConf+0.02 {
 				return "we"
 			}
 		}
