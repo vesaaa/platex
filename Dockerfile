@@ -20,6 +20,7 @@ WORKDIR /app
 # Example override:
 #   docker build --build-arg WE_REC_MODEL_URL=https://.../plate_rec_color.onnx .
 ARG WE_REC_MODEL_URL="https://github.com/vesaaa/plateai/releases/download/v2026.5/plate_rec_color.onnx"
+ARG MODELS_ZIP_URLS="https://github.com/vesaaa/platex/releases/latest/download/20230229.zip,https://github.com/vesaaa/platex/releases/download/v1.0.9/20230229.zip,https://hyperlpr.tunm.top/raw/20230229.zip,http://hyperlpr.tunm.top/raw/20230229.zip"
 ARG ORT_VERSION="1.18.1"
 ARG ORT_GPU_VARIANT="cuda12"
 ARG ORT_GPU11_VERSION="1.18.1"
@@ -64,7 +65,7 @@ RUN mkdir -p /app/ort/cuda && \
 RUN chmod +x /app/lpr-server /app/entrypoint.sh && \
     ln -sf /app/ort/cpu/libonnxruntime.so /app/libonnxruntime.so && \
     ln -sf /app/ort/cpu/libonnxruntime.so.1.18.1 /app/libonnxruntime.so.1.18.1 && \
-    /app/lpr-server -download
+    PLATEX_MODELS_ZIP_URLS="$MODELS_ZIP_URLS" /app/lpr-server -download
 
 # Optional: fetch WE plate_rec_color model from GitHub Release.
 # Keep this non-fatal so CI still succeeds even if URL is unavailable.

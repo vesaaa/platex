@@ -2,16 +2,27 @@ package modeldl
 
 import (
 	"archive/zip"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
-// DefaultModelsZIP is the official CDN link for the HyperLPR3 models archive.
-const DefaultModelsZIP = "http://hyperlpr.tunm.top/raw/20230229.zip"
+const defaultDownloadTimeout = 5 * time.Minute
+
+// DefaultModelsZIPs are tried in order (first successful source wins).
+// Users can override with PLATEX_MODELS_ZIP_URLS (comma-separated URLs).
+var DefaultModelsZIPs = []string{
+	"https://github.com/vesaaa/platex/releases/latest/download/20230229.zip",
+	"https://github.com/vesaaa/platex/releases/download/v1.0.9/20230229.zip",
+	"https://hyperlpr.tunm.top/raw/20230229.zip",
+	"http://hyperlpr.tunm.top/raw/20230229.zip",
+}
 
 // RequiredModels maps the filename inside the ZIP to our target filename.
 var RequiredModels = map[string]string{
@@ -33,7 +44,8 @@ func DownloadModels(modelsDir string) error {
 		return nil
 	}
 
-	slog.Info("Starting download of HyperLPR3 models archive...")
+	sources := resolveModelZipSources()
+	slog.Info("Starting download of HyperLPR3 models archive...", "sources", strings.Join(sources, ","))
 
 	// Create temp file for zip
 	tempFile, err := os.CreateTemp("", "hyperlpr_models_*.zip")
@@ -43,22 +55,9 @@ func DownloadModels(modelsDir string) error {
 	tempZipPath := tempFile.Name()
 	defer os.Remove(tempZipPath)
 
-	// Download zip
-	resp, err := http.Get(DefaultModelsZIP)
-	if err != nil {
+	if err := downloadFirstAvailableZip(tempFile, sources); err != nil {
 		tempFile.Close()
-		return fmt.Errorf("download zip: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		tempFile.Close()
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	if _, err := io.Copy(tempFile, resp.Body); err != nil {
-		tempFile.Close()
-		return fmt.Errorf("save zip file: %w", err)
+		return err
 	}
 	tempFile.Close()
 
@@ -110,4 +109,70 @@ func DownloadModels(modelsDir string) error {
 
 	slog.Info("All models successfully downloaded and extracted to", "dir", modelsDir)
 	return nil
+}
+
+func resolveModelZipSources() []string {
+	if raw, ok := os.LookupEnv("PLATEX_MODELS_ZIP_URLS"); ok {
+		parts := strings.Split(raw, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				out = append(out, p)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	return DefaultModelsZIPs
+}
+
+func downloadFirstAvailableZip(tempFile *os.File, sources []string) error {
+	client := &http.Client{Timeout: defaultDownloadTimeout}
+	var lastErr error
+
+	for _, src := range sources {
+		slog.Info("Trying model source", "url", src)
+		if _, err := tempFile.Seek(0, 0); err != nil {
+			return fmt.Errorf("seek temp zip file: %w", err)
+		}
+		if err := tempFile.Truncate(0); err != nil {
+			return fmt.Errorf("truncate temp zip file: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, src, nil)
+		if err != nil {
+			lastErr = fmt.Errorf("create request for %s: %w", src, err)
+			continue
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("download zip from %s: %w", src, err)
+			slog.Warn("Model source failed", "url", src, "error", err)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("download zip from %s: unexpected status code %d", src, resp.StatusCode)
+			resp.Body.Close()
+			slog.Warn("Model source failed", "url", src, "status", resp.StatusCode)
+			continue
+		}
+
+		if _, err := io.Copy(tempFile, resp.Body); err != nil {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("save zip file from %s: %w", src, err)
+			slog.Warn("Model source failed", "url", src, "error", err)
+			continue
+		}
+		resp.Body.Close()
+		slog.Info("Model source succeeded", "url", src)
+		return nil
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no model sources configured")
+	}
+	return fmt.Errorf("download zip failed from all sources: %w", lastErr)
 }
