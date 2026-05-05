@@ -91,12 +91,27 @@ func (d *Detector) DetectPlates(img image.Image) ([]PlateDetection, error) {
 		return []PlateDetection{}, nil
 	}
 
+	// Expand detected boxes by a small margin to avoid clipping plate edge
+	// characters (province letter on the left, last digit on the right).
+	// The expansion is proportional to box dimensions.
+	const boxExpandX = 0.08
+	const boxExpandY = 0.06
+
 	restored := make([]PlateDetection, 0, len(rows))
 	for _, b := range rows {
 		x1 := int(math.Round((float64(b.x1)-padX)/scale)) + srcBounds.Min.X
 		y1 := int(math.Round((float64(b.y1)-padY)/scale)) + srcBounds.Min.Y
 		x2 := int(math.Round((float64(b.x2)-padX)/scale)) + srcBounds.Min.X
 		y2 := int(math.Round((float64(b.y2)-padY)/scale)) + srcBounds.Min.Y
+
+		bw := x2 - x1
+		bh := y2 - y1
+		dx := int(math.Round(float64(bw) * boxExpandX))
+		dy := int(math.Round(float64(bh) * boxExpandY))
+		x1 -= dx
+		y1 -= dy
+		x2 += dx
+		y2 += dy
 
 		if x1 < srcBounds.Min.X {
 			x1 = srcBounds.Min.X
