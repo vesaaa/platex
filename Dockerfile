@@ -13,9 +13,13 @@ FROM debian:bookworm-slim
 WORKDIR /app
 
 # Optional WE recognizer model download URL (can be overridden at build time).
-# Example:
+# Pinned tag (reproducible):
+#   https://github.com/vesaaa/plateai/releases/download/v2026.5/plate_rec_color.onnx
+# Floating "Latest" release (same file name; tracks whatever GitHub marks Latest):
+#   https://github.com/vesaaa/plateai/releases/latest/download/plate_rec_color.onnx
+# Example override:
 #   docker build --build-arg WE_REC_MODEL_URL=https://.../plate_rec_color.onnx .
-ARG WE_REC_MODEL_URL="https://github.com/vesaaa/plateai/releases/download/v2026.4/plate_rec_color.onnx"
+ARG WE_REC_MODEL_URL="https://github.com/vesaaa/plateai/releases/download/v2026.5/plate_rec_color.onnx"
 ARG ORT_VERSION="1.18.1"
 ARG ORT_GPU_VARIANT="cuda12"
 ARG ORT_GPU11_VERSION="1.18.1"
