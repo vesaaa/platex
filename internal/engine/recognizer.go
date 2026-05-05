@@ -867,13 +867,31 @@ func confusionCorrections(ch rune, pos, total int) []rune {
 	switch up {
 	case '0':
 		return []rune{'D'}
+	case 'B':
+		if total == 8 && (pos == 2 || pos == 3) {
+			return []rune{'8'}
+		}
+		return nil
 	case '7':
 		// 7/1 is frequent in blurred vertical strokes.
 		return []rune{'1'}
+	case '5':
+		if total == 8 && (pos == 2 || pos == 3) {
+			return []rune{'S'}
+		}
+		return nil
 	case 'E':
 		// Tail letter E is frequently confused with L.
 		return []rune{'L'}
+	case 'S':
+		if total == 8 && (pos == 2 || pos == 3) {
+			return []rune{'5'}
+		}
+		return nil
 	case '8':
+		if total == 8 && (pos == 2 || pos == 3) {
+			return []rune{'B'}
+		}
 		// Tail 8/4 confusion appears on thin-stroke blurry digits.
 		if total >= 7 && pos == total-1 {
 			return []rune{'4'}
@@ -890,6 +908,12 @@ func confusionReplacementPenalty(orig, repl rune, pos, total int) float32 {
 	// Tail digit micro-correction: keep conservative but lower penalty.
 	if total >= 7 && pos == total-1 && o == '8' && r == '4' {
 		return 0.05
+	}
+	if total == 8 && (pos == 2 || pos == 3) {
+		if (o == '8' && r == 'B') || (o == 'B' && r == '8') ||
+			(o == '5' && r == 'S') || (o == 'S' && r == '5') {
+			return 0.10
+		}
 	}
 	return 0.20
 }
@@ -970,6 +994,34 @@ func preferConfusionReplacement(r []rune, confs []float32, pos int, repl rune) b
 			feature -= 0.30
 		}
 		return feature >= 0.44
+	case (orig == '8' && repl == 'B') || (orig == 'B' && repl == '8'):
+		if len(r) != 8 || !looksLikeMainlandPlatePrefix(r) || (pos != 2 && pos != 3) {
+			return false
+		}
+		if pos == 2 && hasFollowingDigitRun(r, 3, 2) {
+			feature += 0.28
+		}
+		if pos == 3 && (unicode.ToUpper(r[2]) == 'D' || unicode.ToUpper(r[2]) == 'F') && hasFollowingDigitRun(r, 4, 2) {
+			feature += 0.32
+		}
+		if curConf > 0.80 {
+			feature -= 0.26
+		}
+		return feature >= 0.46
+	case (orig == '5' && repl == 'S') || (orig == 'S' && repl == '5'):
+		if len(r) != 8 || !looksLikeMainlandPlatePrefix(r) || (pos != 2 && pos != 3) {
+			return false
+		}
+		if pos == 2 && hasFollowingDigitRun(r, 3, 2) {
+			feature += 0.26
+		}
+		if pos == 3 && (unicode.ToUpper(r[2]) == 'D' || unicode.ToUpper(r[2]) == 'F') && hasFollowingDigitRun(r, 4, 2) {
+			feature += 0.30
+		}
+		if curConf > 0.80 {
+			feature -= 0.26
+		}
+		return feature >= 0.46
 	default:
 		return false
 	}

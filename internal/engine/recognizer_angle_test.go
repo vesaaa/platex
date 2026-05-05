@@ -199,6 +199,22 @@ func TestRerankAmbiguousPlate_TailDigitEightToFour(t *testing.T) {
 	}
 }
 
+func TestPreferConfusionReplacement_8ToBLowConfidenceAtNEVSlot(t *testing.T) {
+	r := []rune("粤L809793")
+	confs := []float32{0.95, 0.93, 0.61, 0.80, 0.92, 0.93, 0.94, 0.95}
+	if !preferConfusionReplacement(r, confs, 2, 'B') {
+		t.Fatalf("expected low-confidence NEV-slot 8->B to be preferred")
+	}
+}
+
+func TestPreferConfusionReplacement_5ToSHighConfidenceNoFlip(t *testing.T) {
+	r := []rune("粤LD59793")
+	confs := []float32{0.95, 0.93, 0.92, 0.89, 0.92, 0.93, 0.94, 0.95}
+	if preferConfusionReplacement(r, confs, 3, 'S') {
+		t.Fatalf("expected high-confidence NEV-slot 5 to keep original")
+	}
+}
+
 func TestRerankLengthMismatchCandidate_CollapsedNEV(t *testing.T) {
 	r := []rune("粤LF6064")
 	confs := []float32{0.95, 0.93, 0.86, 0.90, 0.89, 0.91, 0.92}
