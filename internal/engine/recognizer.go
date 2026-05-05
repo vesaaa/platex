@@ -1369,42 +1369,74 @@ func normalizePlateNumberWithConfidence(s string, confs []float32) (string, []fl
 	}
 
 	// Soft correction 2:
-	// For new-energy-like tail, convert '0' -> 'D' only on low confidence.
-	// Example: 粤LD07111 -> 粤LDD7111
-	if len(r) >= 8 {
-		for i := 2; i <= len(r)-4; i++ {
-			if r[i] != '0' {
-				continue
+	// For new-energy-like 8-char plates, fix D/0 and F/E confusion at the NEV
+	// marker positions (index 2 and 7). Thresholds widened from 0.72 to 0.88
+	// based on 20w diagnosis showing D->0 (26) and F->E (12) as top confusions.
+	if len(r) == 8 && looksLikeMainlandPlatePrefix(r) {
+		// Position 2: '0' -> 'D' when followed by digits and preceded by letter.
+		if r[2] == '0' && confs[2] < 0.88 && isASCIILetter(r[1]) && allDigits(r[3:]) {
+			r[2] = 'D'
+			if confs[2] < 0.72 {
+				confs[2] = 0.72
 			}
-			thr := float32(0.72)
-			if i == 3 && (unicode.ToUpper(r[2]) == 'D' || unicode.ToUpper(r[2]) == 'F') {
-				thr = 0.82
+		}
+		// Position 2: 'E' -> 'F' when followed by digits and preceded by letter.
+		if unicode.ToUpper(r[2]) == 'E' && confs[2] < 0.88 && isASCIILetter(r[1]) && allDigits(r[3:]) {
+			r[2] = 'F'
+			if confs[2] < 0.72 {
+				confs[2] = 0.72
 			}
-			if confs[i] >= thr {
-				continue
+		}
+		// Position 3: '0' -> 'D' when pos2 is already D/F (small-NEV: 粤LD0xxxx → 粤LDDxxxx).
+		if r[3] == '0' && confs[3] < 0.88 &&
+			(unicode.ToUpper(r[2]) == 'D' || unicode.ToUpper(r[2]) == 'F') &&
+			allDigits(r[4:]) {
+			r[3] = 'D'
+			if confs[3] < 0.72 {
+				confs[3] = 0.72
 			}
-			if i > 0 && isASCIILetter(r[i-1]) && allDigits(r[i+1:]) {
-				r[i] = 'D'
-				confs[i] = thr
-				break
+		}
+		// Position 3: 'E' -> 'F' when pos2 is already D/F.
+		if unicode.ToUpper(r[3]) == 'E' && confs[3] < 0.88 &&
+			(unicode.ToUpper(r[2]) == 'D' || unicode.ToUpper(r[2]) == 'F') &&
+			allDigits(r[4:]) {
+			r[3] = 'F'
+			if confs[3] < 0.72 {
+				confs[3] = 0.72
+			}
+		}
+		// Position 7 (last char): '0' -> 'D' for large-NEV form.
+		if r[7] == '0' && confs[7] < 0.88 && allDigits(r[3:7]) {
+			r[7] = 'D'
+			if confs[7] < 0.72 {
+				confs[7] = 0.72
+			}
+		}
+		// Position 7 (last char): 'E' -> 'F' for large-NEV form.
+		if unicode.ToUpper(r[7]) == 'E' && confs[7] < 0.88 && allDigits(r[3:7]) {
+			r[7] = 'F'
+			if confs[7] < 0.72 {
+				confs[7] = 0.72
 			}
 		}
 	}
 
 	// Soft correction 2b:
 	// For standard 7-char outputs, recover D/0 confusion in the penultimate slot
-	// under a strict structural pattern and low confidence.
+	// under a strict structural pattern. Threshold widened from 0.85 to 0.90.
 	// Example: 粤L70205 -> 粤L702D5
 	if len(r) == 7 &&
 		looksLikeMainlandPlatePrefix(r) &&
 		r[5] == '0' &&
-		confs[5] < 0.85 &&
+		confs[5] < 0.90 &&
 		unicode.IsDigit(r[2]) &&
 		unicode.IsDigit(r[3]) &&
 		unicode.IsDigit(r[4]) &&
 		unicode.IsDigit(r[6]) {
 		r[5] = 'D'
-		confs[5] = 0.85
+		if confs[5] < 0.85 {
+			confs[5] = 0.85
+		}
 	}
 
 	// Soft correction 3:

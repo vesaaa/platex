@@ -580,28 +580,8 @@ func pickBetterPlateCandidate(primary string, pConf float32, we string, weConf f
 		}
 		return "primary"
 	}
-	// Province match preferred but not mandatory: when WE has high confidence
-	// and the non-province characters align well, allow WE to also correct a
-	// wrong province char. 20w error analysis shows province_err is 31% of all
-	// failures and the old hard gate blocked WE from fixing any of them.
+	// Province must match for WE to win.
 	if pr[0] != wr[0] {
-		if len(pr) == len(wr) && (len(pr) == 7 || len(pr) == 8) &&
-			weConf >= 0.90 && weConf > pConf {
-			// Check alignment on positions [1:] (everything except province).
-			matched := 0
-			minLen := len(pr)
-			if len(wr) < minLen {
-				minLen = len(wr)
-			}
-			for i := 1; i < minLen; i++ {
-				if pr[i] == wr[i] {
-					matched++
-				}
-			}
-			if matched >= minLen-2 {
-				return "we"
-			}
-		}
 		return "primary"
 	}
 
