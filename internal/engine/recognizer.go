@@ -882,7 +882,16 @@ func confusionCorrections(ch rune, pos, total int) []rune {
 		return nil
 	case 'E':
 		// Tail letter E is frequently confused with L.
+		// For 8-char NEV marker area, E/F confusion is also common.
+		if total == 8 && (pos == 2 || pos == 3) {
+			return []rune{'L', 'F'}
+		}
 		return []rune{'L'}
+	case 'F':
+		if total == 8 && (pos == 2 || pos == 3) {
+			return []rune{'E'}
+		}
+		return nil
 	case 'S':
 		if total == 8 && (pos == 2 || pos == 3) {
 			return []rune{'5'}
@@ -911,7 +920,8 @@ func confusionReplacementPenalty(orig, repl rune, pos, total int) float32 {
 	}
 	if total == 8 && (pos == 2 || pos == 3) {
 		if (o == '8' && r == 'B') || (o == 'B' && r == '8') ||
-			(o == '5' && r == 'S') || (o == 'S' && r == '5') {
+			(o == '5' && r == 'S') || (o == 'S' && r == '5') ||
+			(o == 'E' && r == 'F') || (o == 'F' && r == 'E') {
 			return 0.10
 		}
 	}
@@ -1018,6 +1028,22 @@ func preferConfusionReplacement(r []rune, confs []float32, pos int, repl rune) b
 		if pos == 3 && (unicode.ToUpper(r[2]) == 'D' || unicode.ToUpper(r[2]) == 'F') && hasFollowingDigitRun(r, 4, 2) {
 			feature += 0.30
 		}
+		if curConf > 0.80 {
+			feature -= 0.26
+		}
+		return feature >= 0.46
+	case (orig == 'E' && repl == 'F') || (orig == 'F' && repl == 'E'):
+		// Strictly restrict E/F to 8-char NEV marker area.
+		if len(r) != 8 || !looksLikeMainlandPlatePrefix(r) || (pos != 2 && pos != 3) {
+			return false
+		}
+		if pos == 2 && hasFollowingDigitRun(r, 3, 2) {
+			feature += 0.28
+		}
+		if pos == 3 && (unicode.ToUpper(r[2]) == 'D' || unicode.ToUpper(r[2]) == 'F') && hasFollowingDigitRun(r, 4, 2) {
+			feature += 0.32
+		}
+		// Penalize if both sides look stable.
 		if curConf > 0.80 {
 			feature -= 0.26
 		}
