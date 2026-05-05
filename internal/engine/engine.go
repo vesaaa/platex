@@ -541,7 +541,9 @@ func shouldRunEnsemble(plate string, conf float32) bool {
 		if !looksLikeNewEnergyPlate(r) && conf < ensMaxPrimaryConf {
 			return true
 		}
-		if conf < 0.87 {
+		// NEV plates: widened from 0.87 to 0.93 so more NEV results get
+		// WE cross-checked (31.8% of 20w errors are NEV with mid-high conf).
+		if conf < 0.93 {
 			return true
 		}
 	}
@@ -592,8 +594,9 @@ func pickBetterPlateCandidate(primary string, pConf float32, we string, weConf f
 	}
 	// 8 -> 7 length trim: WE must equal primary's first 7 chars when primary
 	// is not a valid NEV (NEV-shaped should not be trimmed) and primary is
-	// mid-confidence at most.
-	if len(pr) == 8 && len(wr) == 7 && weConf >= 0.86 && !looksLikeNewEnergyPlate(pr) && pConf < 0.93 {
+	// not extremely confident. Widened from 0.93 to 0.96 based on 20w error
+	// analysis showing ~18% of errors are 8-char non-NEV (CTC over-decode).
+	if len(pr) == 8 && len(wr) == 7 && weConf >= 0.86 && !looksLikeNewEnergyPlate(pr) && pConf < 0.96 {
 		if alignmentMatches(pr[:7], wr) >= 6 {
 			return "we"
 		}
@@ -609,12 +612,14 @@ func pickBetterPlateCandidate(primary string, pConf float32, we string, weConf f
 	}
 
 	// Same length + same province: allow WE when outputs differ slightly but WE
-	// is clearly favored by confidence — enables trained WE corrections without
-	// hardcoding individual plate substitutions.
+	// is favored by confidence — enables trained WE corrections without
+	// hardcoding individual plate substitutions. Relaxed from weConf>=0.88 /
+	// pConf+0.02 based on 20w error analysis: many 1-2 char errors where WE
+	// is slightly better but was blocked by tight thresholds.
 	if len(pr) == len(wr) && (len(pr) == 7 || len(pr) == 8) {
 		matched := alignmentMatches(pr, wr)
 		if matched >= len(pr)-2 && matched < len(pr) {
-			if weConf >= 0.88 && weConf >= pConf+0.02 {
+			if weConf >= 0.85 && weConf >= pConf-0.01 {
 				return "we"
 			}
 		}
