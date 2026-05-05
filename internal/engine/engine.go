@@ -189,7 +189,11 @@ func (e *Engine) recognizeSingle(img image.Image, resizeMode string) (*types.Pla
 	}
 
 	if plateNumber == "" || confidence < e.config.Rec.MinConfidence {
-		// Not an error - just no plate detected with sufficient confidence
+		return nil, nil
+	}
+	// Reject structurally invalid results (e.g. single-char "J" from failed CTC).
+	// Valid mainland plates are at least 7 chars; anything shorter than 5 is noise.
+	if len([]rune(strings.TrimSpace(plateNumber))) < 5 {
 		return nil, nil
 	}
 
