@@ -595,6 +595,15 @@ func pickBetterPlateCandidate(primary string, pConf float32, we string, weConf f
 		}
 	}
 
+	// Short primary recovery: when primary decoded fewer chars than expected
+	// (e.g. province letter cropped: 粤D84602 vs WE 粤LD84602), let WE win
+	// if WE is standard-length and the primary chars mostly appear in WE.
+	if len(pr) >= 2 && len(pr) < 7 && (len(wr) == 7 || len(wr) == 8) && weConf >= 0.82 {
+		if alignmentMatches(pr, wr) >= len(pr)-1 {
+			return "we"
+		}
+	}
+
 	// Same length + same province: allow WE when outputs differ slightly but WE
 	// is clearly favored by confidence — enables trained WE corrections without
 	// hardcoding individual plate substitutions.
