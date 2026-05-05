@@ -20,6 +20,8 @@ engine:
     recognizer: "models/plate_rec.onnx"
     detector: "models/plate_detect.onnx"
     color: "models/plate_color.onnx"
+    # WE fine-tuned plate_rec_color (HyperLPR we0091234 family); plateai exports drop-in here.
+    recognizer_we: "models/plate_rec_color.onnx"
 
   onnx:
     # 每个ONNX Session的推理线程数
@@ -32,14 +34,14 @@ engine:
     min_confidence: 0.6
     # 全图模式下单图最大车牌数
     max_plates: 10
-    # full 模式默认最多识别的候选框数量（可被请求 options.max_plates 覆盖）
-    full_max_plates: 3
+    # full 模式默认最多识别的候选框数量（可被请求 options.max_plates 覆盖）；多车牌场景可调大
+    full_max_plates: 4
     # full 模式对疑似小图执行“直识别命中即停”的阈值
     full_early_stop_conf: 0.65
 
   detection:
-    # full 模式检测置信度阈值，越低召回越高但误检可能增加
-    conf_threshold: 0.30
+    # full 模式检测置信度阈值；略降可提升召回（漏检↓），误检略升。可按线上错误类型与耗时微调。
+    conf_threshold: 0.28
     # NMS IoU 阈值，越低抑制越强，越高保留更多重叠框
     iou_threshold: 0.45
     # NMS 后最多保留候选框数量（防止低阈值下候选过多拖慢识别）

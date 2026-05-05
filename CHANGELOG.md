@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased — Notes from the YOLO26 evaluation (2026-04-29)
 
+- Example `configs/config.yaml`: explicit `models.recognizer_we`, slightly lower
+  `detection.conf_threshold` (0.28) for recall-oriented full-mode tuning, and
+  `engine.recognition.full_max_plates` raised to 4 for multi-plate scenes. Adjust per
+  deployment if latency or false positives shift.
+
 - Evaluated the upstream-newer detector model `yolo26s-plate-detect.pt`
   (we0091234/yolo26-plate, Ultralytics YOLO26 pose, 64MB) as a drop-in
   replacement for the YOLOv5-face detector currently in use.
