@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Plate color is derived from the recognized plate format first (GA 36):
+  NEV 8-char green, `警` white, `港/澳/使/领` black, `学/挂` yellow; standard
+  7-char plates are yellow only when >= 45% of the plate center is saturated
+  yellow, else blue. The HyperLPR3 color model (3 classes, no white/black)
+  plus heuristics now only covers formats the rules don't know. On the
+  9,991-image clean held-out set: color 98.3% -> 99.7% (blue 97.9% -> 99.8%,
+  yellow 2/21 -> 16/21, white 0/9 -> 5/9, black 0/1 -> 1/1); the remaining
+  errors are mostly plates whose number was misread.
+- Plate type recognizes the 2021+ extended small-NEV segments (3rd char
+  A/B/C/E/G/H/J/K, e.g. `粤BAX1329`; 17% of NEV plates in the 20万 set), which
+  were reported as `unknown`. The legacy recognizer's length-repair
+  heuristics keep the narrow D/F rule. Plate accuracy on the clean set:
+  with PlateCRNN 98.83% -> 98.80% (-3 images, low-confidence fallbacks),
+  without PlateCRNN 89.7% -> 90.1%.
 - Add optional PlateCRNN primary recognizer (`models.recognizer_crnn`,
   default `models/plate_rec_crnn.onnx`; trained in plateai `plateai/crnn`).
   32x160 input, 40 CTC steps, so 8-char NEV plates and repeated characters

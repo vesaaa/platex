@@ -1715,7 +1715,7 @@ func ctcDecode(output []float32, timeSteps, numClasses int) (string, []float32, 
 func classifyPlateType(plateNumber string) types.PlateType {
 	runes := []rune(plateNumber)
 	switch {
-	case len(runes) == 8 && looksLikeNewEnergyPlate(runes):
+	case isNewEnergyPlateFormat(runes):
 		return types.PlateTypeNewEnergy
 	case len(runes) == 7:
 		return types.PlateTypeStandard7
@@ -1823,4 +1823,23 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// isNewEnergyPlateFormat is looksLikeNewEnergyPlate plus the extended
+// small-NEV segments (2021+): pure electric D/A/B/C/E, other NEV F/G/H/J/K at
+// the 3rd char, then a letter or digit and 4 digits, e.g. 粤BAX1329 (~17% of
+// the NEV plates in the 20万 set). Used for the reported type and color only:
+// the legacy recognizer's length-repair heuristics keep the narrow D/F rule,
+// because widening it there lets their phantom 8th chars through.
+func isNewEnergyPlateFormat(r []rune) bool {
+	if looksLikeNewEnergyPlate(r) {
+		return true
+	}
+	return len(r) == 8 && looksLikeMainlandPlatePrefix(r) &&
+		strings.ContainsRune("ABCEGHJK", unicode.ToUpper(r[2])) &&
+		isASCIIAlnum(r[3]) && allDigits(r[4:])
+}
+
+func isASCIIAlnum(c rune) bool {
+	return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')
 }
