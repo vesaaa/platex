@@ -4,6 +4,8 @@ import (
 	"image"
 	"log/slog"
 	"math"
+
+	"github.com/vesaa/platex/internal/types"
 )
 
 // ColorClassifier handles license plate color classification.
@@ -118,4 +120,78 @@ func (c *ColorClassifier) Close() {
 	if c.model != nil {
 		c.model.Close()
 	}
+}
+
+// Plate color rules. Mainland plate color is fixed by the plate format
+// (GA 36): NEV green, police white, HK/Macau/embassy black, learner/trailer
+// yellow; only standard 7-char plates can be blue (small car) or yellow
+// (large vehicle). On the 20万 camera crops the 3-class color model called
+// ~2% of blue plates yellow (the cameras tint blue towards cyan and white
+// text towards yellow) and cannot output white or black at all, so color is
+// derived from the recognized number first, and for standard plates from the
+// share of saturated yellow pixels in the plate center.
+const (
+	yellowPlateMinFraction = 0.45
+	// Yellow in OpenCV HSV terms: H 12..38 (of 180), S and V >= 90 (of 255).
+	yellowHueMinDeg = 24.0
+	yellowHueMaxDeg = 76.0
+	yellowMinSV     = 90.0
+)
+
+// plateColorByFormat returns the plate color implied by the plate number,
+// consulting the image only for standard 7-char plates (blue vs yellow).
+// ok=false means the format doesn't determine the color.
+func plateColorByFormat(plate string, img image.Image) (color int, ok bool) {
+	r := []rune(plate)
+	if len(r) < 7 || !looksLikeMainlandPlatePrefix(r) {
+		return 0, false
+	}
+	switch last := r[len(r)-1]; {
+	case last == '警':
+		return int(types.ColorWhite), true
+	case last == '港' || last == '澳' || last == '使' || last == '领':
+		return int(types.ColorBlack), true
+	case last == '学' || last == '挂':
+		return int(types.ColorYellow), true
+	}
+	if isNewEnergyPlateFormat(r) {
+		return int(types.ColorGreen), true
+	}
+	if len(r) == 7 && isStandardPlateTail(r[2:]) {
+		if yellowPixelFraction(img) >= yellowPlateMinFraction {
+			return int(types.ColorYellow), true
+		}
+		return int(types.ColorBlue), true
+	}
+	return 0, false
+}
+
+// isStandardPlateTail reports whether the 5 chars after province+city are
+// all letters/digits (excludes special suffixes handled above).
+func isStandardPlateTail(r []rune) bool {
+	for _, c := range r {
+		if !(c >= '0' && c <= '9') && !(c >= 'A' && c <= 'Z') {
+			return false
+		}
+	}
+	return len(r) == 5
+}
+
+// yellowPixelFraction is the share of saturated yellow pixels in the central
+// region of the plate (96x32 resample, margins trimmed so car body around a
+// tight crop doesn't count).
+func yellowPixelFraction(img image.Image) float64 {
+	small := resizeImage(img, 96, 32)
+	total, yellow := 0, 0
+	for y := 5; y < 27; y++ {
+		for x := 14; x < 82; x++ {
+			c := small.NRGBAAt(x, y)
+			h, s, v := rgbToHSV(float64(c.R), float64(c.G), float64(c.B))
+			total++
+			if h >= yellowHueMinDeg && h <= yellowHueMaxDeg && s >= yellowMinSV && v >= yellowMinSV {
+				yellow++
+			}
+		}
+	}
+	return float64(yellow) / float64(total)
 }

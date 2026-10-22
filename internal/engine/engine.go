@@ -250,16 +250,40 @@ func (e *Engine) finishPlateResult(img image.Image, plateNumber string, confiden
 		return nil
 	}
 
-	// Step 2: Color classification
+	// Step 2: Determine plate type
+	plateType := classifyPlateType(plateNumber)
+
+	// Step 3: Color. The plate format decides it when it can; the color
+	// model + heuristics only cover formats the rules don't know.
+	colorCode, ok := plateColorByFormat(plateNumber, img)
+	if !ok {
+		colorCode = e.classifyColorFallback(img, plateNumber, plateType, weColorCode, weColorConf)
+	}
+
+	colorName := "其他"
+	if name, ok := types.ColorNames[types.PlateColor(colorCode)]; ok {
+		colorName = name
+	}
+
+	return &types.PlateResult{
+		PlateNumber: plateNumber,
+		Color:       types.PlateColor(colorCode),
+		ColorName:   colorName,
+		Confidence:  confidence,
+		Type:        plateType,
+	}
+}
+
+// classifyColorFallback is the model-based color path (HyperLPR3 color model,
+// WE color head, then consistency corrections) for plates whose format does
+// not determine the color.
+func (e *Engine) classifyColorFallback(img image.Image, plateNumber string, plateType types.PlateType, weColorCode int, weColorConf float32) int {
 	colorCode, colorConf := e.color.Classify(img)
 	// Prefer the WE color when its confidence dominates the heuristic-fallback color.
 	if weColorCode >= 0 && weColorConf > colorConf {
 		colorCode = weColorCode
 		colorConf = weColorConf
 	}
-
-	// Step 3: Determine plate type
-	plateType := classifyPlateType(plateNumber)
 
 	// Lightweight consistency correction:
 	// new-energy plates are predominantly green; if color confidence is low,
@@ -303,19 +327,7 @@ func (e *Engine) finishPlateResult(img image.Image, plateNumber string, confiden
 		)
 		colorCode = int(types.ColorBlue)
 	}
-
-	colorName := "其他"
-	if name, ok := types.ColorNames[types.PlateColor(colorCode)]; ok {
-		colorName = name
-	}
-
-	return &types.PlateResult{
-		PlateNumber: plateNumber,
-		Color:       types.PlateColor(colorCode),
-		ColorName:   colorName,
-		Confidence:  confidence,
-		Type:        plateType,
-	}
+	return colorCode
 }
 
 // RecognizeBatch processes a batch of image inputs.
