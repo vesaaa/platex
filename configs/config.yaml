@@ -22,6 +22,9 @@ engine:
     color: "models/plate_color.onnx"
     # WE fine-tuned plate_rec_color (HyperLPR we0091234 family); plateai exports drop-in here.
     recognizer_we: "models/plate_rec_color.onnx"
+    # plateai PlateCRNN (40 CTC steps). When present it is the primary recognizer;
+    # plate_rec / plate_rec_color only run when its confidence is low. Missing file = disabled.
+    recognizer_crnn: "models/plate_rec_crnn.onnx"
 
   onnx:
     # 每个ONNX Session的推理线程数

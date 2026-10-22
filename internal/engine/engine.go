@@ -33,12 +33,15 @@ type Engine struct {
 	detector     *Detector
 	recognizer   *Recognizer
 	recognizerWE *RecognizerWE
-	color        *ColorClassifier
-	config       *config.EngineConfig
-	workerCh     chan *recognizeJob
-	urlFetchCh   chan struct{}
-	httpClient   *http.Client
-	wg           sync.WaitGroup
+	// recognizerCRNN is the primary recognizer when loaded; nil keeps the
+	// HyperLPR3 (+WE ensemble) path as the only recognizer.
+	recognizerCRNN *RecognizerCRNN
+	color          *ColorClassifier
+	config         *config.EngineConfig
+	workerCh       chan *recognizeJob
+	urlFetchCh     chan struct{}
+	httpClient     *http.Client
+	wg             sync.WaitGroup
 
 	// Stats
 	totalImages atomic.Int64
@@ -108,14 +111,27 @@ func New(cfg *config.EngineConfig) (*Engine, error) {
 		weRec = nil
 	}
 
+	// Optional: plateai PlateCRNN. When loaded it is tried first and the
+	// recognizers above only run on its low-confidence results.
+	crnnRec, err := NewRecognizerCRNN(
+		cfg.Models.RecognizerCRNN,
+		cfg.ONNX.ThreadsPerSession,
+		cfg.ONNX.OptimizationLevel,
+	)
+	if err != nil {
+		slog.Warn("Failed to load CRNN recognizer; using legacy recognizers only", "error", err)
+		crnnRec = nil
+	}
+
 	e := &Engine{
-		detector:     detector,
-		recognizer:   recognizer,
-		recognizerWE: weRec,
-		color:        colorCls,
-		config:       cfg,
-		workerCh:   make(chan *recognizeJob, cfg.Workers*2),
-		urlFetchCh: make(chan struct{}, max(1, cfg.URL.MaxFetchConcurrency)),
+		detector:       detector,
+		recognizer:     recognizer,
+		recognizerWE:   weRec,
+		recognizerCRNN: crnnRec,
+		color:          colorCls,
+		config:         cfg,
+		workerCh:       make(chan *recognizeJob, cfg.Workers*2),
+		urlFetchCh:     make(chan struct{}, max(1, cfg.URL.MaxFetchConcurrency)),
 		httpClient: &http.Client{
 			Timeout: time.Duration(max(100, cfg.URL.FetchTimeoutMs)) * time.Millisecond,
 			Transport: &http.Transport{
@@ -155,14 +171,37 @@ func (e *Engine) worker(id int) {
 
 // recognizeSingle performs recognition on a single image.
 func (e *Engine) recognizeSingle(img image.Image, resizeMode string) (*types.PlateResult, error) {
-	if e.recognizer == nil {
-		return nil, fmt.Errorf("recognizer model not loaded")
+	plate, _, err := e.recognizeSingleTrusted(img, resizeMode)
+	return plate, err
+}
+
+// recognizeSingleTrusted is recognizeSingle that also reports whether the
+// result is a confident PlateCRNN answer, which callers may return as-is
+// without trying other crops of the image.
+func (e *Engine) recognizeSingleTrusted(img image.Image, resizeMode string) (*types.PlateResult, bool, error) {
+	if e.recognizer == nil && e.recognizerCRNN == nil {
+		return nil, false, fmt.Errorf("recognizer model not loaded")
+	}
+
+	// Step 0: PlateCRNN. A confident answer is final; otherwise it is kept as
+	// the fallback in case the legacy recognizers find nothing.
+	crnnPlate, crnnConf := "", float32(0)
+	if e.recognizerCRNN != nil {
+		if p, _, c, crnnErr := e.recognizerCRNN.Recognize(img); crnnErr == nil {
+			crnnPlate, crnnConf = p, c
+		} else {
+			slog.Warn("CRNN recognition failed", "error", crnnErr)
+		}
+	}
+	if crnnPlate != "" && (crnnConf >= crnnTrustConf || e.recognizer == nil) {
+		plate := e.finishPlateResult(img, crnnPlate, crnnConf, -1, 0)
+		return plate, plate != nil && crnnConf >= crnnTrustConf, nil
 	}
 
 	// Step 1: Primary recognition (HyperLPR3 v3 SVTR-LCNet).
 	plateNumber, _, confidence, err := e.recognizer.RecognizeWithResizeMode(img, resizeMode)
 	if err != nil {
-		return nil, fmt.Errorf("recognition: %w", err)
+		return nil, false, fmt.Errorf("recognition: %w", err)
 	}
 
 	// Step 1b (optional): when an ensemble recognizer is available and the
@@ -188,13 +227,27 @@ func (e *Engine) recognizeSingle(img image.Image, resizeMode string) (*types.Pla
 		}
 	}
 
+	if plateNumber == "" && crnnPlate != "" {
+		plateNumber, confidence = crnnPlate, crnnConf
+	}
+	return e.finishPlateResult(img, plateNumber, confidence, weColorCode, weColorConf), false, nil
+}
+
+// crnnTrustConf is the PlateCRNN min-char-probability above which its answer
+// is taken without consulting the legacy recognizers. On the 20万 held-out
+// split, results at >= 0.7 cover 92.5% of images at 98.1% accuracy.
+const crnnTrustConf = float32(0.7)
+
+// finishPlateResult applies the confidence/structure gate, then classifies
+// color and plate type. weColorCode < 0 means no WE color candidate.
+func (e *Engine) finishPlateResult(img image.Image, plateNumber string, confidence float32, weColorCode int, weColorConf float32) *types.PlateResult {
 	if plateNumber == "" || confidence < e.config.Rec.MinConfidence {
-		return nil, nil
+		return nil
 	}
 	// Reject structurally invalid results (e.g. single-char "J" from failed CTC).
 	// Valid mainland plates are at least 7 chars; anything shorter than 5 is noise.
 	if len([]rune(strings.TrimSpace(plateNumber))) < 5 {
-		return nil, nil
+		return nil
 	}
 
 	// Step 2: Color classification
@@ -262,7 +315,7 @@ func (e *Engine) recognizeSingle(img image.Image, resizeMode string) (*types.Pla
 		ColorName:   colorName,
 		Confidence:  confidence,
 		Type:        plateType,
-	}, nil
+	}
 }
 
 // RecognizeBatch processes a batch of image inputs.
@@ -307,7 +360,13 @@ func (e *Engine) RecognizeBatch(inputs []types.ImageInput, mode string, opts *ty
 
 			effectiveMode := mode
 			if mode == "auto" {
-				if shouldUseCropByAspect(img) {
+				// With PlateCRNN, the full pipeline already routes by
+				// confidence: plate-like images are recognized directly and
+				// returned when CRNN is confident; the rest (large scenes,
+				// hard crops) go through detection + warp.
+				if e.recognizerCRNN != nil {
+					effectiveMode = "full"
+				} else if shouldUseCropByAspect(img) {
 					effectiveMode = "crop"
 				} else {
 					effectiveMode = "full"
@@ -396,9 +455,11 @@ func (e *Engine) recognizeFull(img image.Image, opts *types.RecognizeOption, res
 	if tryDirect {
 		// Fast short-circuit for plate-like inputs in full mode:
 		// if direct whole-image OCR is high quality, skip detector path.
-		if plate, recErr := e.recognizeSingle(img, resizeMode); recErr == nil && plate != nil {
+		// With PlateCRNN loaded only its confident answers short-circuit;
+		// low-confidence crops do better through detection + warp.
+		if plate, trusted, recErr := e.recognizeSingleTrusted(img, resizeMode); recErr == nil && plate != nil {
 			direct = plate
-			if isHighQualityFullDirect(*plate, directEarlyStopConf) {
+			if trusted || (e.recognizerCRNN == nil && isHighQualityFullDirect(*plate, directEarlyStopConf)) {
 				return []types.PlateResult{*plate}, nil
 			}
 		}
@@ -764,6 +825,13 @@ const (
 )
 
 func (e *Engine) recognizePlateRegion(img image.Image, det PlateDetection, resizeMode string) *types.PlateResult {
+	if e.recognizerCRNN != nil {
+		// PlateCRNN was trained on camera crops that keep a margin around the
+		// plate; a warp tight to the corner keypoints cuts into the border
+		// characters and drops its confidence.
+		det.Keypoints = expandKeypoints(det.Keypoints, crnnWarpMarginX, crnnWarpMarginY)
+		det.Box = expandBox(img.Bounds(), det.Box, crnnWarpMarginX, crnnWarpMarginY)
+	}
 	box := det.Box
 	useWarp := det.HasKeys && det.Score >= plateWarpScoreFloor && keypointsValid(det.Keypoints, 6.0)
 
@@ -869,6 +937,39 @@ func (e *Engine) tryExpandedKeypointWarp(img image.Image, det PlateDetection, ba
 // expandKeypointsHorizontally returns a new quad whose left/right edges are
 // pushed outward (positive ratio) or inward (negative ratio) along the local
 // horizontal axis defined by (TR-TL) and (BR-BL).
+// Margins added around detected plates before PlateCRNN recognition (ratio of
+// plate width per side / plate height top and bottom). Picked by sweep on
+// synthetic scenes: 0 -> 91.0%, 0.06/0.15 -> 92.7%, wider was no better.
+const (
+	crnnWarpMarginX = 0.06
+	crnnWarpMarginY = 0.15
+)
+
+// expandKeypoints grows the plate quad outward by rx of its width on each side
+// and ry of its height on top and bottom.
+func expandKeypoints(kp PlateKeypoints, rx, ry float64) PlateKeypoints {
+	kp = expandKeypointsHorizontally(kp, rx)
+	tl, tr, br, bl := kp[0], kp[1], kp[2], kp[3]
+	lDx, lDy := bl[0]-tl[0], bl[1]-tl[1]
+	rDx, rDy := br[0]-tr[0], br[1]-tr[1]
+	return PlateKeypoints{
+		{tl[0] - lDx*ry, tl[1] - lDy*ry},
+		{tr[0] - rDx*ry, tr[1] - rDy*ry},
+		{br[0] + rDx*ry, br[1] + rDy*ry},
+		{bl[0] + lDx*ry, bl[1] + lDy*ry},
+	}
+}
+
+// expandBox grows an [x1,y1,x2,y2] box by the same ratios, clamped to bounds.
+func expandBox(bounds image.Rectangle, box [4]int, rx, ry float64) [4]int {
+	dx := int(float64(box[2]-box[0]) * rx)
+	dy := int(float64(box[3]-box[1]) * ry)
+	return [4]int{
+		max(bounds.Min.X, box[0]-dx), max(bounds.Min.Y, box[1]-dy),
+		min(bounds.Max.X, box[2]+dx), min(bounds.Max.Y, box[3]+dy),
+	}
+}
+
 func expandKeypointsHorizontally(kp PlateKeypoints, ratio float64) PlateKeypoints {
 	if ratio == 0 {
 		return kp
@@ -1227,6 +1328,9 @@ func (e *Engine) Close() {
 	}
 	if e.recognizerWE != nil {
 		e.recognizerWE.Close()
+	}
+	if e.recognizerCRNN != nil {
+		e.recognizerCRNN.Close()
 	}
 	if e.detector != nil {
 		e.detector.Close()
