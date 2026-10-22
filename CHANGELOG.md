@@ -2,7 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased — Notes from the YOLO26 evaluation (2026-04-29)
+## Unreleased
+
+- Add optional PlateCRNN primary recognizer (`models.recognizer_crnn`,
+  default `models/plate_rec_crnn.onnx`; trained in plateai `plateai/crnn`).
+  32x160 input, 40 CTC steps, so 8-char NEV plates and repeated characters
+  no longer collapse. Its answer is final at min-char-prob >= 0.7; below that
+  the HyperLPR3 + WE path runs as before. Missing file = v1.0.11 behavior.
+- `mode=auto` routes by confidence when PlateCRNN is loaded: plate-like
+  images are recognized directly and returned when CRNN is confident;
+  everything else (large scenes, hard crops) goes through detection + warp.
+  Callers no longer need to pick `crop` / `full`.
+- Detected plates are warped with a margin (6% width per side, 15% height
+  top/bottom) before PlateCRNN, matching the camera crops it was trained on.
+- Docker: optional `CRNN_REC_MODEL_URL` build arg (non-fatal download).
+- Bench on the 20,082-image plate-held-out split of the 20万 labeled set
+  (12-core CPU, local images):
+  - v1.0.11 `full`: 86.5%, ~73 QPS
+  - PlateCRNN `auto`: 95.6%, ~280 QPS (`crop`: 94.5%; `full` now shares the `auto` path)
+  - synthetic 1920x1080 scenes (300 pasted crops): 91.0% -> 92.7%; the rest
+    are detector misses on the synthetic backgrounds
+  - without the CRNN file: 86.5%, identical to v1.0.11
+
+## Notes from the YOLO26 evaluation (2026-04-29)
 
 - Docker: default `WE_REC_MODEL_URL` now points at plateai release **v2026.5**
   (`plate_rec_color.onnx`). GitHub Actions release workflow again builds and

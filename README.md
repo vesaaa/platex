@@ -43,8 +43,13 @@ bash scripts/build.sh linux-arm64
 models/
 ├── plate_rec.onnx        # 字符识别 (输入: 1×3×48×160, 必需)
 ├── plate_detect.onnx     # 全图检测 (输入: 1×3×320×320, full 模式必需)
-└── plate_color.onnx      # 颜色分类 (可选, 无则自动回退 HSV 启发式算法)
+├── plate_color.onnx      # 颜色分类 (可选, 无则自动回退 HSV 启发式算法)
+├── plate_rec_color.onnx  # WE 识别 (可选, 低置信度时交叉校验)
+└── plate_rec_crnn.onnx   # PlateCRNN 主识别 (可选, 推荐; 输入 1×3×32×160, 40 步 CTC)
 ```
+
+`plate_rec_crnn.onnx` 来自 plateai 的 `plateai/crnn`（release `crnn-2026.10-poc`）。放入后自动成为主识别模型：置信度 ≥ 0.7 直接返回，否则才调用 `plate_rec` / `plate_rec_color`。缺少该文件时行为与 v1.0.11 完全一致。
+20 万人工标注集按车牌号留出的 20,082 张测试图上：v1.0.11 为 86.5%，启用 PlateCRNN 后 `mode=auto` 为 95.6%，QPS 约 73 → 280（12 核 CPU，本地图片）。
 
 ### 4. 运行
 
@@ -241,8 +246,12 @@ GPU 使用说明（Linux）：
 - `engine.detection.max_candidates`: NMS 后最多保留候选框数量（默认 `50`）
 
 识别路由说明（`mode=auto`，默认）：
-- 输入图宽高比在 `3.33 ±10%`（约 `3.0 ~ 3.66`）范围内，自动按 `crop` 流程识别（更快）
-- 不在该范围内，自动按 `full` 流程识别（先检测再识别）
+- 已加载 PlateCRNN 时按置信度路由，大图小图都无需指定 `mode`：
+  - 类车牌小图（宽高比 0.8~5.2 且不超过 1280×512）先整图直接识别，PlateCRNN 置信度 ≥ 0.7 立即返回
+  - 其余情况（大图、或小图置信度低）走检测 + 透视矫正，矫正区域四周留边后再识别，直识别结果也参与择优
+- 未加载 PlateCRNN 时沿用旧规则：
+  - 输入图宽高比在 `3.33 ±10%`（约 `3.0 ~ 3.66`）范围内，自动按 `crop` 流程识别（更快）
+  - 不在该范围内，自动按 `full` 流程识别（先检测再识别）
 
 `engine.recognition.full_max_plates`（默认 `3`）用于限制 full 模式默认识别候选框数量，可显著影响 full 吞吐；
 如需更高召回可调大，若追求 QPS 建议保持 `2~4`。
@@ -268,7 +277,7 @@ GPU 使用说明（Linux）：
 | `full_early_stop_conf` | float | 0.65 | full 模式直识别“命中即停”阈值（越低越激进，越高越保守） |
 
 `mode` 参数说明（请求顶层）：
-- `auto`（默认）：按图像比例自动路由到 `crop` 或 `full`
+- `auto`（默认）：自动路由，推荐（见上文"识别路由说明"）
 - `crop`：仅走车牌小图识别路径
 - `full`：先检测再识别
 

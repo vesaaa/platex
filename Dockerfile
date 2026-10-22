@@ -20,6 +20,8 @@ WORKDIR /app
 # Example override:
 #   docker build --build-arg WE_REC_MODEL_URL=https://.../plate_rec_color.onnx .
 ARG WE_REC_MODEL_URL="https://github.com/vesaaa/plateai/releases/download/v2026.5/plate_rec_color.onnx"
+# Optional PlateCRNN primary recognizer (plateai/crnn). Empty = skip.
+ARG CRNN_REC_MODEL_URL="https://github.com/vesaaa/plateai/releases/download/crnn-2026.10-poc/plate_rec_crnn.onnx"
 ARG MODELS_ZIP_URLS="https://github.com/vesaaa/platex/releases/download/v1.0.0-models/20230229.zip"
 ARG ORT_VERSION="1.18.1"
 ARG ORT_GPU_VARIANT="cuda12"
@@ -74,6 +76,14 @@ RUN mkdir -p /app/models && \
       echo "Downloading optional WE model from: $WE_REC_MODEL_URL"; \
       curl -fL --retry 3 --retry-delay 2 "$WE_REC_MODEL_URL" -o /app/models/plate_rec_color.onnx || \
       echo "WARN: optional WE model download failed; continuing without plate_rec_color.onnx"; \
+    fi
+
+# Optional: fetch PlateCRNN primary recognizer. Non-fatal like the WE model;
+# without it the engine keeps the legacy recognizers.
+RUN if [ -n "$CRNN_REC_MODEL_URL" ]; then \
+      echo "Downloading optional CRNN model from: $CRNN_REC_MODEL_URL"; \
+      curl -fL --retry 3 --retry-delay 2 "$CRNN_REC_MODEL_URL" -o /app/models/plate_rec_crnn.onnx || \
+      echo "WARN: optional CRNN model download failed; continuing without plate_rec_crnn.onnx"; \
     fi
 
 # Expose API port

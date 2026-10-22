@@ -43,6 +43,9 @@ type ModelsConfig struct {
 	Detector     string `yaml:"detector"`
 	Color        string `yaml:"color"`
 	RecognizerWE string `yaml:"recognizer_we"`
+	// RecognizerCRNN is the plateai PlateCRNN model; when present it is the
+	// primary recognizer and the models above become the low-confidence fallback.
+	RecognizerCRNN string `yaml:"recognizer_crnn"`
 }
 
 // ONNXConfig holds ONNX Runtime settings.
@@ -106,10 +109,11 @@ func DefaultConfig() *Config {
 			Workers:         workers,
 			SubmitTimeoutMs: 300,
 			Models: ModelsConfig{
-				Recognizer:   "models/plate_rec.onnx",
-				Detector:     "models/plate_detect.onnx",
-				Color:        "models/plate_color.onnx",
-				RecognizerWE: "models/plate_rec_color.onnx",
+				Recognizer:     "models/plate_rec.onnx",
+				Detector:       "models/plate_detect.onnx",
+				Color:          "models/plate_color.onnx",
+				RecognizerWE:   "models/plate_rec_color.onnx",
+				RecognizerCRNN: "models/plate_rec_crnn.onnx",
 			},
 			ONNX: ONNXConfig{
 				ThreadsPerSession: 1,
