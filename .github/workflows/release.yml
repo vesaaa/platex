@@ -55,7 +55,9 @@ jobs:
             build/platex-linux-arm64.tar.gz
           generate_release_notes: true
           draft: false
-          prerelease: false
+          # Tags with a suffix (v1.1.0-beta.1) are prereleases: they don't become
+          # "Latest" and don't move the floating cpu/cuda11/cuda12 image tags.
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -71,7 +73,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=${{ github.ref_name }}-cpu
-            type=raw,value=cpu
+            type=raw,value=cpu,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Extract metadata for CUDA11 image
         id: meta_cuda11
@@ -80,7 +82,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=${{ github.ref_name }}-cuda11
-            type=raw,value=cuda11
+            type=raw,value=cuda11,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Extract metadata for CUDA12 image
         id: meta_cuda12
@@ -89,7 +91,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=${{ github.ref_name }}-cuda12
-            type=raw,value=cuda12
+            type=raw,value=cuda12,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push CPU image
         uses: docker/build-push-action@v5
