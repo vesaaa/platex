@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Tiled detection for large scenes (`engine.detection.tile_size`, default
+  960, 0 = off): images longer than 1.25x the tile size are also detected on
+  30%-overlapping tiles and merged (detections cut by an inner tile edge are
+  dropped; overlaps keep the best score). The detector input is fixed at
+  320x320, so a 150px plate in a 1944x2592 roadside frame shrank to ~18px
+  and was missed.
+- `isLikelyPlateBox` minimum area ratio 0.003 -> 0.0002: small far plates
+  were dropped whenever a nearer plate was also found.
+- `cmd/plate-crops` + `Engine.DetectPlateCrops`: harvest training crops from
+  labeled scenes using the exact inference detection + warp path.
+- 2,500 labeled roadside scenes (pass = labeled plate among returned
+  plates, max_plates 10): 58.0% -> 80.8% (area fix alone 69.8%; tile 1280
+  79.7%, 720 80.5%). Throughput on those 5MP scenes 12.4 -> 4.5 images/s
+  (8 workers); crop-sized inputs are not tiled (clean crop set unchanged,
+  98.81%).
+
 - Plate color is derived from the recognized plate format first (GA 36):
   NEV 8-char green, `警` white, `港/澳/使/领` black, `学/挂` yellow; standard
   7-char plates are yellow only when >= 45% of the plate center is saturated

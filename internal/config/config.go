@@ -67,6 +67,10 @@ type DetectionConfig struct {
 	ConfThreshold float32 `yaml:"conf_threshold"`
 	IoUThreshold  float32 `yaml:"iou_threshold"`
 	MaxCandidates int     `yaml:"max_candidates"`
+	// TileSize > 0 additionally runs detection on overlapping tiles of about
+	// this many pixels for images larger than 1.25x it (small far plates in
+	// large scenes). 0 disables tiling.
+	TileSize int `yaml:"tile_size"`
 }
 
 // URLConfig holds settings for URL image input fetching.
@@ -129,6 +133,7 @@ func DefaultConfig() *Config {
 				ConfThreshold: 0.30,
 				IoUThreshold:  0.45,
 				MaxCandidates: 50,
+				TileSize:      960,
 			},
 			URL: URLConfig{
 				Enabled:             true,
