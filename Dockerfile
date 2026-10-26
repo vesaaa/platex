@@ -21,7 +21,7 @@ WORKDIR /app
 #   docker build --build-arg WE_REC_MODEL_URL=https://.../plate_rec_color.onnx .
 ARG WE_REC_MODEL_URL="https://github.com/vesaaa/plateai/releases/download/v2026.5/plate_rec_color.onnx"
 # Optional PlateCRNN primary recognizer (plateai/crnn). Empty = skip.
-ARG CRNN_REC_MODEL_URL="https://github.com/vesaaa/plateai/releases/download/crnn-2026.10-poc/plate_rec_crnn.onnx"
+ARG CRNN_REC_MODEL_URL="https://github.com/vesaaa/plateai/releases/download/crnn-2026.10-ft1/plate_rec_crnn.onnx"
 ARG MODELS_ZIP_URLS="https://github.com/vesaaa/platex/releases/download/v1.0.0-models/20230229.zip"
 ARG ORT_VERSION="1.18.1"
 ARG ORT_GPU_VARIANT="cuda12"
