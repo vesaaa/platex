@@ -1232,7 +1232,9 @@ func isLikelyPlateBox(bounds image.Rectangle, box [4]int) bool {
 		return false
 	}
 	areaRatio := boxArea / imgArea
-	return areaRatio >= 0.003 && areaRatio <= 0.60
+	// The lower bound used to be 0.003, which drops a 150x50 plate in a
+	// 1944x2592 roadside scene (0.0015) whenever a nearer plate is also found.
+	return areaRatio >= 0.0002 && areaRatio <= 0.60
 }
 
 func shouldRetryStatusError(err error) bool {

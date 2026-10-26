@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"math"
 	"sort"
 
@@ -18,6 +19,8 @@ type Detector struct {
 	confThr     float32
 	iouThr      float32
 	maxCand     int
+	// tileSize > 0 enables tiled detection on images larger than ~1.25x it.
+	tileSize int
 }
 
 // NewDetector creates a detector for full-image plate localization.
@@ -36,6 +39,7 @@ func NewDetector(modelPath string, threads, optLevel int, cfg config.DetectionCo
 		confThr:     normalizeConfThreshold(cfg.ConfThreshold),
 		iouThr:      normalizeIoUThreshold(cfg.IoUThreshold),
 		maxCand:     normalizeMaxCandidates(cfg.MaxCandidates),
+		tileSize:    cfg.TileSize,
 	}, nil
 }
 
@@ -69,6 +73,36 @@ func (d *Detector) DetectPlates(img image.Image) ([]PlateDetection, error) {
 	if d.model == nil {
 		return nil, fmt.Errorf("detector model not loaded")
 	}
+	dets, err := d.detectRegion(img)
+	if err != nil {
+		return nil, err
+	}
+	tiles := detectorTiles(img.Bounds(), d.tileSize)
+	if len(tiles) == 0 {
+		return dets, nil
+	}
+	// The detector sees a fixed 320x320 input, so on large scenes (e.g.
+	// 1944x2592 roadside cameras) a plate shrinks below ~20px and is missed.
+	// Also detect on overlapping tiles and merge. A tile detection touching an
+	// inner tile edge is a cut-off plate; the overlap guarantees the whole
+	// plate appears in a neighbouring tile (or in the full-image pass).
+	for _, t := range tiles {
+		tileDets, err := d.detectRegion(subImage(img, t))
+		if err != nil {
+			return nil, err
+		}
+		for _, det := range tileDets {
+			if !touchesInnerEdge(det.Box, t, img.Bounds()) {
+				dets = append(dets, det)
+			}
+		}
+	}
+	return mergeDetections(dets, d.iouThr), nil
+}
+
+// detectRegion runs the detector once on img (any bounds; results are in
+// img's coordinate space).
+func (d *Detector) detectRegion(img image.Image) ([]PlateDetection, error) {
 
 	srcBounds := img.Bounds()
 	srcW := srcBounds.Dx()
@@ -383,4 +417,103 @@ func normalizeMaxCandidates(v int) int {
 		return 50
 	}
 	return v
+}
+
+const detectorTileOverlap = 0.3
+
+// detectorTiles splits bounds into an even grid of square-ish tiles of about
+// size px overlapping by detectorTileOverlap. Returns nil when the image is
+// small enough for a single pass.
+func detectorTiles(b image.Rectangle, size int) []image.Rectangle {
+	if size <= 0 || max(b.Dx(), b.Dy()) <= size*5/4 {
+		return nil
+	}
+	xs := tileStarts(b.Min.X, b.Dx(), size)
+	ys := tileStarts(b.Min.Y, b.Dy(), size)
+	tiles := make([]image.Rectangle, 0, len(xs)*len(ys))
+	for _, y := range ys {
+		for _, x := range xs {
+			tiles = append(tiles, image.Rect(x, y, min(x+size, b.Max.X), min(y+size, b.Max.Y)).Intersect(b))
+		}
+	}
+	return tiles
+}
+
+func tileStarts(origin, length, size int) []int {
+	if length <= size {
+		return []int{origin}
+	}
+	stride := float64(size) * (1 - detectorTileOverlap)
+	n := int(math.Ceil(float64(length-size)/stride)) + 1
+	step := float64(length-size) / float64(n-1)
+	starts := make([]int, n)
+	for i := range starts {
+		starts[i] = origin + int(math.Round(step*float64(i)))
+	}
+	return starts
+}
+
+// subImage returns the rect part of img keeping img's coordinate space.
+func subImage(img image.Image, rect image.Rectangle) image.Image {
+	if s, ok := img.(interface {
+		SubImage(image.Rectangle) image.Image
+	}); ok {
+		return s.SubImage(rect)
+	}
+	dst := image.NewNRGBA(rect)
+	draw.Draw(dst, rect, img, rect.Min, draw.Src)
+	return dst
+}
+
+// touchesInnerEdge reports whether box reaches an edge of tile that is not
+// also an edge of the full image.
+func touchesInnerEdge(box [4]int, tile, full image.Rectangle) bool {
+	const m = 2
+	return (tile.Min.X > full.Min.X && box[0] <= tile.Min.X+m) ||
+		(tile.Min.Y > full.Min.Y && box[1] <= tile.Min.Y+m) ||
+		(tile.Max.X < full.Max.X && box[2] >= tile.Max.X-m) ||
+		(tile.Max.Y < full.Max.Y && box[3] >= tile.Max.Y-m)
+}
+
+// mergeDetections keeps the highest-scoring detection among overlapping ones
+// (IoU above iouThr, or one box mostly inside the other).
+func mergeDetections(dets []PlateDetection, iouThr float32) []PlateDetection {
+	sort.SliceStable(dets, func(i, j int) bool { return dets[i].Score > dets[j].Score })
+	kept := make([]PlateDetection, 0, len(dets))
+	for _, d := range dets {
+		dup := false
+		for _, k := range kept {
+			if boxIoU(d.Box, k.Box) > iouThr || boxIoMin(d.Box, k.Box) > 0.7 {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			kept = append(kept, d)
+		}
+	}
+	return kept
+}
+
+func boxArea(b [4]int) int { return max(0, b[2]-b[0]) * max(0, b[3]-b[1]) }
+
+func boxInter(a, b [4]int) int {
+	return boxArea([4]int{max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])})
+}
+
+func boxIoU(a, b [4]int) float32 {
+	in := boxInter(a, b)
+	u := boxArea(a) + boxArea(b) - in
+	if u <= 0 {
+		return 0
+	}
+	return float32(in) / float32(u)
+}
+
+func boxIoMin(a, b [4]int) float32 {
+	m := min(boxArea(a), boxArea(b))
+	if m <= 0 {
+		return 0
+	}
+	return float32(boxInter(a, b)) / float32(m)
 }
