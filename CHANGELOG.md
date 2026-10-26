@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Docker: default PlateCRNN model is now plateai release `crnn-2026.10-ft1`
+  (fine-tuned on roadside scene plates, mostly Yunnan/Hubei). End-to-end
+  with tiled detection: held-out scenes 81.5% -> 89.2%, clean crop set
+  98.82% -> 98.94%. Same I/O as `crnn-2026.10-poc`.
 - Tiled detection for large scenes (`engine.detection.tile_size`, default
   960, 0 = off): images longer than 1.25x the tile size are also detected on
   30%-overlapping tiles and merged (detections cut by an inner tile edge are

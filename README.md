@@ -48,7 +48,7 @@ models/
 └── plate_rec_crnn.onnx   # PlateCRNN 主识别 (可选, 推荐; 输入 1×3×32×160, 40 步 CTC)
 ```
 
-`plate_rec_crnn.onnx` 来自 plateai 的 `plateai/crnn`（release `crnn-2026.10-poc`）。放入后自动成为主识别模型：置信度 ≥ 0.7 直接返回，否则才调用 `plate_rec` / `plate_rec_color`。缺少该文件时行为与 v1.0.11 完全一致。
+`plate_rec_crnn.onnx` 来自 plateai 的 `plateai/crnn`（release `crnn-2026.10-ft1`；旧版 `crnn-2026.10-poc` 仍可用，输入输出一致可直接替换）。放入后自动成为主识别模型：置信度 ≥ 0.7 直接返回，否则才调用 `plate_rec` / `plate_rec_color`。缺少该文件时行为与 v1.0.11 完全一致。
 20 万人工标注集按车牌号留出的 20,082 张测试图上：v1.0.11 为 86.5%，启用 PlateCRNN 后 `mode=auto` 为 95.6%，QPS 约 73 → 280（12 核 CPU，本地图片）。
 
 ### 4. 运行
